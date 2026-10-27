@@ -1,0 +1,12 @@
+CREATE TABLE IF NOT EXISTS migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL);
+CREATE TABLE competitors (id TEXT PRIMARY KEY, name TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '', paused INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0, last_refresh TEXT, last_error TEXT);
+CREATE TABLE profiles (id TEXT PRIMARY KEY, competitor_id TEXT NOT NULL REFERENCES competitors(id), platform TEXT NOT NULL CHECK(platform IN ('meta','instagram','youtube')), identifier TEXT NOT NULL, label TEXT NOT NULL DEFAULT '', confirmed INTEGER NOT NULL DEFAULT 0, UNIQUE(platform,identifier));
+CREATE TABLE items (id TEXT PRIMARY KEY, competitor_id TEXT NOT NULL REFERENCES competitors(id), profile_id TEXT REFERENCES profiles(id) ON DELETE SET NULL, platform TEXT NOT NULL, external_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('paid','organic')), format TEXT NOT NULL, data TEXT NOT NULL CHECK(json_valid(data)), first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, UNIQUE(platform,external_id));
+CREATE INDEX items_competitor_format ON items(competitor_id,platform,format);
+CREATE TABLE boards (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '');
+CREATE TABLE opportunities (id TEXT PRIMARY KEY, board_id TEXT NOT NULL REFERENCES boards(id), item_id TEXT NOT NULL REFERENCES items(id), notes TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(tags)), rating INTEGER NOT NULL DEFAULT 0 CHECK(rating BETWEEN 0 AND 5), stage TEXT NOT NULL DEFAULT 'Saved' CHECK(stage IN ('Saved','Briefing','Creating','Launched','Winner')), UNIQUE(board_id,item_id));
+CREATE TABLE briefs (id TEXT PRIMARY KEY, board_id TEXT REFERENCES boards(id) ON DELETE SET NULL, format TEXT NOT NULL, created_at TEXT NOT NULL, data TEXT NOT NULL CHECK(json_valid(data)));
+CREATE TABLE refreshes (id TEXT PRIMARY KEY, competitor_id TEXT REFERENCES competitors(id), status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, error TEXT, item_count INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, csrf TEXT NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE login_attempts (key TEXT PRIMARY KEY, count INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+INSERT INTO boards(id,name,description) VALUES ('inbox','Creative Inbox','New references start here.');

@@ -1,0 +1,32 @@
+# Requires a Render account and a paid persistent-disk web service.
+# Review Render's current price before provisioning. No resources are created
+# by committing this file. No cron service is declared.
+services:
+  - type: web
+    name: levr-competitor-analysis
+    runtime: node
+    plan: starter
+    numInstances: 1
+    autoDeploy: false
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    disk:
+      name: levr-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: 24.19.0
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_PATH
+        value: /var/data/levr.sqlite
+      - key: TRUST_PROXY
+        value: "1"
+      - key: OWNER_EMAIL
+        value: fraser@wearelevr.com
+      - key: LEVR_OWNER_PASSWORD
+        sync: false
+      - key: SCRAPECREATORS_API_KEY
+        sync: false
