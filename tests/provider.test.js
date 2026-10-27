@@ -36,6 +36,18 @@ test('Instagram separates Reels, carousel slides and single images; metrics stay
  const photo=normalizeInstagram(ig('2',{media_type:1,product_type:'feed',video_versions:[],like_count:null,comment_count:null,play_count:null,ig_play_count:null}));assert.equal(photo.format,'instagram_image');assert.equal(photo.totalEngagement,null);assert.equal(photo.views,null);
 });
 
+test('Instagram numeric id does not crash or override an available primary identity',()=>{
+ const item=normalizeInstagram(ig('3600545900919030401',{id:123456789}));
+ assert.equal(item.externalId,'3600545900919030401');
+ assert.equal(item.sourceUrl,'https://www.instagram.com/reel/ExamplePost/');
+});
+
+test('Instagram numeric id is usable when the primary identity is absent',()=>{
+ const item=normalizeInstagram(ig('unused',{pk:undefined,id:123456789}));
+ assert.equal(item.externalId,'123456789');
+ assert.equal(item.format,'instagram_reel');
+});
+
 test('Instagram fetches bounded recent pages and retains unavailable transcript without inventing text',async()=>{
  const m=mock([{items:[ig()],next_max_id:'next',more_available:true},()=>new Response('Unavailable',{status:404})]);
  const r=await collectProfile({platform:'instagram',identifier:'@example',confirmed:true},{...options(m.fetchImpl),organicPageLimit:1});

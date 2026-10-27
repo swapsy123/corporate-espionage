@@ -16,3 +16,11 @@ To rerun: `npm test`, `npm run db:migrate`, `npm run build`, and `CHROMIUM_PATH=
 An isolated checkout reproduced a missing build dependency when `NODE_ENV=production npm ci` was followed by `npm run build`: Vite was omitted and the build failed. The corrected Render command `npm ci --include=dev && npm run build` passed under production settings. Startup against a fresh test database returned `/healthz` 200, `/` 200, and signed-out `/api/items` 401.
 
 The owner supplied `https://levr-competitor-analysis.onrender.com` and reported a root-page 502. Direct live verification is blocked by the cloud workspace egress proxy; the production-build fix is verified locally, but its relationship to that live failure remains unconfirmed until Render logs or a successful redeployment are available.
+
+## Confirmed-profile refresh correction
+
+Bulk refresh previously queued every active competitor, including unconfirmed candidates, creating misleading confirmation errors. It now queues only competitors with confirmed profiles and reports how many candidates were skipped. A targeted migration clears that obsolete watchlist error while retaining historical sync records and all saved research.
+
+Polling now preserves loaded cards and scroll position; it clears stale content when the actual query scope changes. Running refresh controls are disabled. Instagram normalization also accepts numeric provider IDs without throwing a string-method error.
+
+Validation: 40 automated tests pass. The production build and existing full desktop/mobile browser smoke pass. A dedicated isolated browser regression (`CHROMIUM_PATH=/usr/bin/chromium node scripts/browser-refresh.mjs`) verifies confirmed-only collection, stable card identity and scroll across progress polls, duplicate controls, successful completion, and clean format changes. This patch still requires deployment to the hosted service before its live behavior can be verified.

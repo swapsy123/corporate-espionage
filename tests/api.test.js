@@ -90,8 +90,9 @@ test('owner-only access protects all data and mutation routes, CSRF, sessions an
 
 test('competitors and profiles require confirmation; pause, edit and archive retain prior research',async t=>{
  const s=await setup(t);await s.login();const c=await s.competitor();
- const p=await s.profile(c,'instagram',false);await s.refresh(c);assert.equal(s.state.calls.length,0);
- let history=(await s.req('/api/refreshes')).data;assert.equal(history[0].status,'failed');assert.match(history[0].error,/Confirm/);
+ const p=await s.profile(c,'instagram',false);
+ const blocked=await s.req('/api/refresh',{method:'POST',body:{competitorId:c.id}});assert.equal(blocked.status,400);assert.match(blocked.data.error,/Confirm/);assert.equal(s.state.calls.length,0);
+ assert.equal((await s.req('/api/refreshes')).data.length,0,'unconfirmed profiles are not queued as failed syncs');
  await s.req(`/api/profiles/${p.id}`,{method:'PATCH',body:{confirmed:true}});await s.refresh(c);assert.equal(s.state.calls.length,1);
  assert.equal((await s.req('/api/items')).data.length,12);
  const changed=await s.req(`/api/profiles/${p.id}`,{method:'PATCH',body:{identifier:'new_fixture_growth',confirmed:true}});assert.equal(changed.data.confirmed,false);
@@ -210,4 +211,47 @@ test('SQLite migrations are repeatable and research, notes, brief, and refresh h
   const storedBrief=reopened.prepare('SELECT data FROM briefs WHERE id=?').get(brief.id);assert.equal(JSON.parse(storedBrief.data).adaptation.hook,brief.adaptation.hook);
   const refresh=reopened.prepare('SELECT * FROM refreshes').get();assert.equal(refresh.status,'success');assert.equal(refresh.item_count,2);assert.deepEqual(JSON.parse(refresh.warnings),[]);
  }finally{reopened.close();}
+});
+
+test('bulk refresh queues only confirmed active competitors and skips candidates without creating failures',async t=>{
+ const s=await setup(t);await s.login();
+ const confirmed=await s.competitor('Confirmed');await s.profile(confirmed,'meta');
+ const candidate=await s.competitor('Candidate');await s.profile(candidate,'instagram',false);
+ await s.competitor('No connected profiles');
+ const paused=await s.competitor('Paused');await s.profile(paused,'youtube');await s.req(`/api/competitors/${paused.id}`,{method:'PATCH',body:{paused:true}});
+ let release;s.state.hold=new Promise(resolve=>{release=resolve;});
+ try {
+  const result=await s.req('/api/refresh',{method:'POST',body:{}});
+  assert.equal(result.status,202);assert.equal(result.data.queuedCount,1);assert.equal(result.data.skippedCount,2);assert.equal(result.data.jobIds.length,1);
+  const status=(await s.req('/api/status')).data;assert.deepEqual(status.refreshingCompetitorIds,[confirmed.id]);assert.equal(status.eligibleCompetitorCount,1);
+  assert.equal((await s.req('/api/refreshes')).data.length,1);
+  assert.equal((await s.req('/api/competitors')).data.find(c=>c.id===candidate.id).lastError,null);
+ }finally{release();await s.waitForRefresh();}
+ assert.deepEqual(s.state.calls.map(p=>p.competitorId),[confirmed.id]);
+ assert.equal((await s.req('/api/refreshes')).data[0].status,'success');
+ assert.equal((await s.req('/api/items')).data.length,2);
+ assert.deepEqual((await s.req('/api/status')).data.refreshingCompetitorIds,[]);
+});
+
+test('bulk refresh with no confirmed profiles does not create false failure history',async t=>{
+ const s=await setup(t);await s.login();const candidate=await s.competitor();await s.profile(candidate,'instagram',false);
+ const result=await s.req('/api/refresh',{method:'POST',body:{}});
+ assert.equal(result.status,400);assert.match(result.data.error,/Unconfirmed competitors are skipped/);
+ assert.equal((await s.req('/api/refreshes')).data.length,0);assert.equal(s.state.calls.length,0);
+ assert.equal((await s.req('/api/competitors')).data[0].lastError,null);
+});
+
+test('migration clears only obsolete unconfirmed-profile watchlist errors and preserves history',async t=>{
+ const directory=mkdtempSync(join(tmpdir(),'levr-refresh-migration-'));const path=join(directory,'research.sqlite');t.after(()=>rmSync(directory,{recursive:true,force:true}));
+ const db=openDatabase(path);
+ db.prepare("INSERT INTO competitors(id,name,last_error) VALUES ('candidate','Candidate',?)").run('Confirm at least one profile before refreshing this competitor.');
+ db.prepare("INSERT INTO competitors(id,name,last_error) VALUES ('other','Other','Provider quota exhausted')").run();
+ db.prepare("INSERT INTO refreshes(id,competitor_id,status,started_at,error) VALUES ('history','candidate','failed','2026-10-27',?)").run('Confirm at least one profile before refreshing this competitor.');
+ db.prepare('DELETE FROM migrations WHERE version=?').run('003_clear_ineligible_refresh_errors.sql');db.close();
+ const migrated=openDatabase(path);
+ try {
+  assert.equal(migrated.prepare("SELECT last_error FROM competitors WHERE id='candidate'").get().last_error,null);
+  assert.equal(migrated.prepare("SELECT last_error FROM competitors WHERE id='other'").get().last_error,'Provider quota exhausted');
+  assert.match(migrated.prepare("SELECT error FROM refreshes WHERE id='history'").get().error,/Confirm/);
+ }finally{migrated.close();}
 });

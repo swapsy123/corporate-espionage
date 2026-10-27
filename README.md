@@ -21,7 +21,7 @@ For hot reload, run `npm run dev` for the server and `npm run dev:ui` for the Vi
 ## Workflow
 
 1. Review candidate competitors and add the correct Meta Page ID, Instagram handle, or YouTube channel. Confirm each connection explicitly.
-2. Refresh one competitor or all confirmed competitors manually. There is no cron job. Prior records survive failed refreshes, and refresh history records actionable errors.
+2. Refresh one competitor or use **Refresh confirmed competitors** to collect from all active, confirmed sources. Unconfirmed candidates are skipped. Progress updates keep the watchlist visible. There is no cron job. Prior records survive failed refreshes, and refresh history records actionable errors.
 3. Explore the paid library sorted by ad duration and organic libraries ranked within each platform and format. Open a reference to inspect media, copy, transcripts when available, and original links.
 4. Save references to the Creative Inbox or a custom Opportunity Lab board. Add notes, tags, ratings, and a workflow stage.
 5. Find recurring patterns across the library or one board. Generate a brief with separately labeled source evidence and original adaptation, or ask the stored library a question with source citations.

@@ -37,7 +37,7 @@ export function createApp(options={}){
  app.use('/api',a.requireAuth);
  app.get('/api/session',(req,res)=>res.json({user:{email:a.ownerEmail},csrf:req.session.csrf}));
  const running=new Set();
- app.get('/api/status',(req,res)=>res.json({providerReady:!!process.env.SCRAPECREATORS_API_KEY,aiReady:!!process.env.LEVR_AI_API_KEY,refreshing:running.size>0,ownerEmail:a.ownerEmail,counts:{competitors:db.prepare('SELECT count(*) n FROM competitors WHERE archived=0').get().n,ads:db.prepare("SELECT count(*) n FROM items WHERE kind='paid' AND coalesce(json_extract(data,'$.active'),1)=1").get().n,posts:db.prepare("SELECT count(*) n FROM items WHERE kind='organic'").get().n,opportunities:db.prepare('SELECT count(*) n FROM opportunities').get().n}}));
+ app.get('/api/status',(req,res)=>res.json({providerReady:!!process.env.SCRAPECREATORS_API_KEY,aiReady:!!process.env.LEVR_AI_API_KEY,refreshing:running.size>0,refreshingCompetitorIds:[...running],eligibleCompetitorCount:db.prepare('SELECT count(*) n FROM competitors c WHERE c.archived=0 AND c.paused=0 AND EXISTS (SELECT 1 FROM profiles p WHERE p.competitor_id=c.id AND p.confirmed=1)').get().n,ownerEmail:a.ownerEmail,counts:{competitors:db.prepare('SELECT count(*) n FROM competitors WHERE archived=0').get().n,ads:db.prepare("SELECT count(*) n FROM items WHERE kind='paid' AND coalesce(json_extract(data,'$.active'),1)=1").get().n,posts:db.prepare("SELECT count(*) n FROM items WHERE kind='organic'").get().n,opportunities:db.prepare('SELECT count(*) n FROM opportunities').get().n}}));
  app.get('/api/competitors',(req,res)=>res.json(competitorRows(db)));
  app.get('/api/profile-candidates',async(req,res)=>{const query=z.string().trim().min(2).max(200).parse(req.query.q);try{res.json(await searchMetaCompanies(query));}catch(e){res.status(502).json({error:e.safeMessage||'Profile search is unavailable. Check the provider settings.'});}});
  app.post('/api/competitors',(req,res)=>{const v=z.object({name:text,notes:z.string().max(5000).optional()}).parse(req.body),cid=id();db.prepare('INSERT INTO competitors(id,name,notes) VALUES (?,?,?)').run(cid,v.name,v.notes||'');res.status(201).json(competitorRows(db).find(c=>c.id===cid));});
@@ -65,9 +65,12 @@ export function createApp(options={}){
   if(!options.collector&&!process.env.SCRAPECREATORS_API_KEY)return res.status(503).json({error:'Set SCRAPECREATORS_API_KEY in secure environment settings before refreshing.'});
   const cs=competitorRows(db).filter(c=>!c.paused&&(!v.competitorId||c.id===v.competitorId));
   if(!cs.length)return res.status(400).json({error:'No active competitors are available to refresh.'});
-  const jobs=[];for(const c of cs){if(running.has(c.id))continue;const jid=id();running.add(c.id);db.prepare('INSERT INTO refreshes(id,competitor_id,status,started_at) VALUES (?,?,?,?)').run(jid,c.id,'running',now());jobs.push({c,jid});}
+  const eligible=cs.filter(c=>c.profiles.some(p=>p.confirmed));
+  const skippedCount=cs.length-eligible.length;
+  if(!eligible.length)return res.status(400).json({error:'Confirm at least one profile before refreshing. Unconfirmed competitors are skipped.'});
+  const jobs=[];for(const c of eligible){if(running.has(c.id))continue;const jid=id();running.add(c.id);db.prepare('INSERT INTO refreshes(id,competitor_id,status,started_at) VALUES (?,?,?,?)').run(jid,c.id,'running',now());db.prepare('UPDATE competitors SET last_error=NULL WHERE id=?').run(c.id);jobs.push({c,jid});}
   if(!jobs.length)return res.status(409).json({error:'These competitors are already refreshing.'});
-  res.status(202).json({jobId:jobs[0].jid,jobIds:jobs.map(j=>j.jid)});
+  res.status(202).json({jobId:jobs[0].jid,jobIds:jobs.map(j=>j.jid),queuedCount:jobs.length,skippedCount});
   // One sequential queue prevents bursts against the provider and survives client disconnects.
   queue=queue.then(async()=>{for(const {c,jid} of jobs)await refreshCompetitor(c,jid);}).catch(()=>{for(const {c,jid} of jobs){running.delete(c.id);db.prepare("UPDATE refreshes SET status='failed',finished_at=?,error=? WHERE id=? AND status='running'").run(now(),'Refresh interrupted. Retry the manual refresh.',jid);}});
  });

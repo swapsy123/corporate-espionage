@@ -50,7 +50,7 @@ export function normalizeMetaAd(raw) {
 }
 export function normalizeInstagram(raw) {
   const r = raw.media || raw;
-  const externalId = String(first(r.pk, r.id?.split('_')[0], r.code) ?? '');
+  const externalId = String(first(r.pk, r.id == null ? undefined : String(r.id).split('_')[0], r.code) ?? '');
   if (!externalId || !r.code) throw new ProviderError('Instagram returned a post without its identity or original link. Previous records were preserved.');
   const carousel = r.media_type === 8 || Array.isArray(r.carousel_media);
   const video = r.media_type === 2 || r.product_type === 'clips';
