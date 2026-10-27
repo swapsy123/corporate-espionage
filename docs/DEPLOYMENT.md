@@ -10,7 +10,7 @@ No hosting resources have been provisioned by the repository files. Creating a R
 2. Choose **New → Blueprint** and select the repository and branch containing `render.yaml`.
 3. Review the web-service and persistent-disk costs shown by Render before creating resources. The blueprint requests one `starter` instance and a 1 GB disk; it does not create a cron job or multiple instances.
 4. In Render's secure environment settings, enter `LEVR_OWNER_PASSWORD` (a unique password of at least 16 characters) and `SCRAPECREATORS_API_KEY`. Do not send these in chat or commit them. Keep `OWNER_EMAIL=fraser@wearelevr.com`.
-5. Apply the blueprint. Render runs `npm ci && npm run build`, then `npm start`. `DATABASE_PATH=/var/data/levr.sqlite` must remain on the attached disk. Keep `NODE_ENV=production` so session cookies require HTTPS.
+5. Apply the blueprint. Render runs `npm ci --include=dev && npm run build`, then `npm start`. `DATABASE_PATH=/var/data/levr.sqlite` must remain on the attached disk. Keep `NODE_ENV=production` so session cookies require HTTPS.
 6. Once the health check passes, use the HTTPS service URL supplied by Render. Sign in as the owner. Verify the signed-out API rejects requests, confirm the correct competitor profiles, then manually refresh one competitor before refreshing all.
 
 A successful build or `/healthz` response alone does not verify data collection. Live verification requires a configured ScrapeCreators account with sufficient credits, confirmed profile identifiers, and working network access.
@@ -47,3 +47,9 @@ The application has no scheduled refresh. Use **Refresh competitor** or **Refres
 ## Publication evidence
 
 Record the actual deployment URL only after the provider confirms deployment. Then verify owner sign-in, unauthorized API rejection, one live collection, saved references, and persistence after a controlled restart. Do not call a local development address, a proposed Render service name, or a development-environment snapshot a published website.
+
+## Applying the production-build correction
+
+The blueprint explicitly includes development dependencies during the build. Vite is needed to compile the client even though the deployed service runs in production mode. A plain `npm ci` with `NODE_ENV=production` can omit Vite and fail with `vite: not found`.
+
+For an existing service created from an earlier blueprint, open its Blueprint in Render and use Manual Sync/Sync to apply the latest repository configuration. Confirm the build command shown in service settings is `npm ci --include=dev && npm run build`. If the configuration sync does not start a deployment, use Manual Deploy → Deploy latest commit. Watch the deployment until it is marked Live.
