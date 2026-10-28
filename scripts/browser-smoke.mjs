@@ -18,7 +18,7 @@ try {
 const page=await browser.newPage({viewport:{width:1440,height:1000}});
 await page.route('https://example.com/**', route=>route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600"><rect width="600" height="600" fill="#f4f2ee"/><text x="50" y="300" fill="#121212">Browser test slide</text></svg>'}));
 const errors=[];page.on('pageerror',e=>errors.push(e.message));
-await page.goto('http://127.0.0.1:3101');
+await page.goto('http://127.0.0.1:3101/overview');
 await page.getByLabel('Email address',{exact:true}).fill('fraser@wearelevr.com');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Enter workspace'}).click();await page.getByRole('heading',{name:'Your market, in focus.'}).waitFor();
 await page.screenshot({path:'/tmp/levr-overview-desktop.png',fullPage:true});
 for(const [route,title] of [['paid','The paid ad library.'],['organic','Organic intelligence.'],['competitors','Know who you’re watching.'],['opportunities','The Opportunity Lab.'],['patterns','Find the repeating ideas.'],['briefs','A better starting point.'],['ask','Ask a better question.']]){await page.goto(`http://127.0.0.1:3101/${route}`);await page.getByRole('heading',{name:title,exact:true}).waitFor();if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw Error(`Desktop overflow: ${route}`);}

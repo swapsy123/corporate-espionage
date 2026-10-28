@@ -1,53 +1,43 @@
-# Levr Competitor Analysis
+# Levr Intelligence Beta
 
-A private content-research workspace for Levr and its clients, covering active Meta ads, Instagram Reels/carousels/images, and separate YouTube Shorts and long-form rankings. The interface follows Levr's editorial system: Inter Tight, warm paper, near-black ink, square corners, hairline rules, and restrained rust emphasis.
+The invitation-only paid workspace for Levr clients. Deploy branch **paid-beta** to a **new service, URL, disk, database and credentials**. The free lead magnet stays on main. Never sync this blueprint into the existing free service.
+
+## Included
+
+- Private client workspaces, owner management, expiring invitations after payment is arranged, and client password setup. No public registration or checkout.
+- Guided onboarding for one core offer, a brand kit, client photos and independent ScrapeCreators accounts. Includes a ChatGPT/Claude brand-kit prompt.
+- Read-only Meta, GoHighLevel, Fathom, Wistia and Stripe connections. Manual 90-day imports, history, deduplication and preservation on failure. No cron or outbound marketing actions.
+- Ad-level daily metrics, Meta-attributed ROAS, currency-separated Stripe collections/refunds, CRM outcomes and explicit manual payment-to-deal matching.
+- Setting/closing call evidence, suggested objections, reviewed excerpts, custom boards and citations.
+- Original campaign briefs using the supplied YappMaxxing, Belief Breaking Diamond and Hook–Proof–Value–CTA frameworks. Source evidence stays separate from adaptation. Levr approves; clients can view, edit and comment. Edits invalidate approval.
+- Carousel Studio: branded text and editorial photo styles, original assets, slides, crops, captions, previews, comments and real 1080 × 1350 PNG exports. ZIPs contain a contact sheet, images-only archive and editable HTML/JSON.
+- Original competitor management, paid-ad library, separate organic rankings, Opportunity Lab, Pattern Finder, research briefs and cited questions.
+- Intelligence questions over imported evidence, public article import, pasted documents and consented audio/video transcription.
+
+Production starts empty. Fixtures are confined to isolated tests. Live providers and external AI require valid account connections and are not verified by local tests.
 
 ## Development
 
-Use Node 24. This cloud task already has an isolated checkout; use the existing repository rather than creating a Git worktree.
+Use Node 24 and Chromium. Inject settings from `.env.example` through secure runtime configuration. Use a unique owner password of at least 16 characters and stable encryption secret of at least 32 characters. The application does not load .env automatically; use Node's --env-file flag locally or managed hosting settings. Never use a VITE_ prefix for a credential.
 
 ```sh
 npm ci
 npm run db:migrate
 npm run build
 npm test
+CHROMIUM_PATH=/usr/bin/chromium npm run test:beta:browser
 npm start
 ```
 
-Before starting, set `LEVR_OWNER_PASSWORD` to a unique value of at least 16 characters in secure environment settings. Set `SCRAPECREATORS_API_KEY` there for live collection. The platform owner is `fraser@wearelevr.com` unless the server-side `OWNER_EMAIL` setting is deliberately changed. Clients sign in with their invited email and a password they set themselves. `.env.example` documents the settings; no real credential belongs in a tracked file. The application does not automatically load `.env` files. For local development, Node's `--env-file` flag can load a separately created, ignored file; prefer injected settings in managed environments.
-
-For hot reload, run `npm run dev` for the server and `npm run dev:ui` for the Vite interface in separate terminals. Build before running the standalone production server. The database defaults to `data/levr.sqlite`, which is ignored by Git.
+The default database is data/levr-beta.sqlite. For hot reload use npm run dev and npm run dev:ui. Docker installs Chromium and builds the interface. Keep one instance with durable local storage.
 
 ## Workflow
 
-1. Review candidate competitors and add the correct Meta Page ID, Instagram handle, or YouTube channel. Confirm each connection explicitly.
-2. Refresh one competitor or use **Refresh confirmed competitors** to collect from all active, confirmed sources. Unconfirmed candidates are skipped. Progress updates keep the watchlist visible. There is no cron job. Prior records survive failed refreshes, and refresh history records actionable errors.
-3. Explore the paid library sorted by ad duration and organic libraries ranked within each platform and format. Open a reference to inspect media, copy, transcripts when available, and original links.
-4. Save references to the Creative Inbox or a custom Opportunity Lab board. Add notes, tags, ratings, and a workflow stage.
-5. Find recurring patterns across the library or one board. Generate a brief with separately labeled source evidence and original adaptation, or ask the stored library a question with source citations.
+1. Sign in as fraser@wearelevr.com, create a workspace under Clients and share its invitation privately after arranging payment.
+2. The client lands in Getting started, enters their core offer and brand kit, uploads photos and connects their own research account.
+3. Levr connects the assigned Meta ad account and GHL subaccount. The client supplies Fathom, Wistia and Stripe read access. Select Import last 90 days manually.
+4. Review evidence and confirm actual prospect objections. Suggestions are not verified loss reasons.
+5. Generate a campaign from a board and selected sources. Resolve missing proof and approve as Levr. Create a carousel from its outline or write one directly.
+6. Review every saved slide, approve the current revision and export. Draft export is available for review. The app does not publish posts or activate GHL workflows.
 
-The initial database contains competitor/profile candidates supplied by the owner, not fabricated ads or posts. Test fixtures are isolated from production data. Live collection cannot be verified until a valid ScrapeCreators key is configured and profile connections are confirmed.
-
-## Research signals
-
-Active-ad duration indicates observed durability; it does not prove profitability, spend, conversions, or ROAS. Organic outlier scores compare a post with other stored posts by the same creator on the same platform and in the same format. Sparse or zero baselines do not receive a fabricated score. Public metrics are incomplete, and missing counts remain unknown. A missing transcript remains labeled unavailable.
-
-Pattern classifications are evidence-based heuristics. Source captions, transcripts, and original links remain available for review. Optional OpenAI access enriches original adaptations; factual evidence and citation targets come from stored records. Content gaps are research hypotheses, not proof of competitor intent or undiscovered demand.
-
-## Validation and publication
-
-Run `npm test`, `npm run db:migrate`, and `npm run build`. Review the generated schema in `server/migrations/`. Tests use isolated databases and fixtures; passing them does not establish live provider access or a deployed site.
-
-See [deployment instructions](docs/DEPLOYMENT.md) for Render hosting, the persistent disk, private owner access, secure credential entry, and publication checks. `render.yaml` is a deployment blueprint; saving it creates no hosting account, service, or final URL.
-
-## Private client workspaces
-
-The owner can create client workspaces and generate invitation links under **Clients**. Share each link directly with its intended recipient. Invitations expire after seven days and are accepted once; there is no public registration or automatic email. The owner can revoke pending invites, remove members, and create one-hour password reset links. Existing client accounts use their current password to accept another workspace invitation.
-
-Each client sees only assigned workspaces. The owner can switch into any client workspace. A new client workspace starts empty with its own Creative Inbox. Existing Levr research stays in the original database. Every client database is stored separately in the durable data directory, and every API request checks workspace membership.
-
-Accepting an invitation opens **Workspace settings** for the invited workspace. A four-step guide links to the ScrapeCreators account page and includes screenshots of Levr’s connection form and connected state. The guide disappears after a successful account check, stays hidden after reload, and returns when the saved key is removed. Existing saved keys can be checked with **Verify saved account**.
-
-Each client connects their own ScrapeCreators account under **Workspace settings**. Levr verifies account access before saving a key; failed checks retain the prior key and research. The field is masked and write-only; saved values are never returned to the browser. Keys and verification dates are encrypted with AES-256-GCM in separate server files, never in the research databases. Clients never fall back to Levr’s provider key. Render creates `LEVR_SECRET_ENCRYPTION_KEY` when the updated blueprint is synced; keep this value stable. Review [deployment instructions](docs/DEPLOYMENT.md) before upgrading an existing service.
-
-Additional validation: `CHROMIUM_PATH=/usr/bin/chromium node scripts/browser-workspaces.mjs` exercises invitation acceptance and workspace boundaries with isolated test accounts.
+Read [deployment instructions](docs/DEPLOYMENT.md) and [provider coverage](docs/PROVIDERS.md). Uploaded editorial instructions are preserved under [docs/skills](docs/skills); client voice and verified evidence override their original personal-brand defaults.

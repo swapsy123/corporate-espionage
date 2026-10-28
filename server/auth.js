@@ -22,7 +22,7 @@ export function auth(db,options={}){
  const production=options.production??process.env.NODE_ENV==='production';
  const ownerHash=validPassword(password)?passwordHash(password):null;
  const dummyHash=passwordHash(randomBytes(32).toString('hex'));
- const cookieName=production?'__Host-levr_session':'levr_session';
+ const cookieName=production?'__Host-levr_beta_session':'levr_beta_session';
  function cookie(res,token,maxAge){res.cookie(cookieName,token,{httpOnly:true,secure:production,sameSite:'strict',path:'/',maxAge});}
  function allowedWorkspaces(user){
   const rows=user.role==='owner'?db.prepare('SELECT id,name,created_at FROM workspaces ORDER BY CASE WHEN id=\'levr\' THEN 0 ELSE 1 END,created_at,id').all():db.prepare('SELECT w.id,w.name,w.created_at FROM workspaces w JOIN memberships m ON m.workspace_id=w.id WHERE m.user_id=? ORDER BY m.created_at,w.id').all(user.id);

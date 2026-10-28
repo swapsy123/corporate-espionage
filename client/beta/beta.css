@@ -1,0 +1,258 @@
+.beta-panel {
+  padding: 28px;
+  margin: 24px 0;
+  min-width: 0;
+}
+.beta-panel > h2 {
+  margin: 0 0 20px;
+}
+.beta-panel form {
+  display: grid;
+  gap: 12px;
+}
+.beta-panel p {
+  max-width: 80ch;
+}
+.beta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+.beta-grid > .beta-panel {
+  margin-top: 0;
+}
+.beta-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+.beta-actions label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.beta-actions input[type="checkbox"],
+.beta-panel input[type="checkbox"] {
+  width: auto;
+}
+.beta-steps {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  border-block: 1px solid var(--line);
+  padding: 20px 0;
+  margin-bottom: 32px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.color-fields {
+  display: flex;
+  gap: 20px;
+}
+.color-fields input {
+  height: 44px;
+  width: 80px;
+  padding: 4px;
+}
+.brand-sample {
+  padding: 28px;
+  border: 1px solid var(--line);
+  margin: 16px 0;
+}
+.source-record {
+  border-top: 1px solid var(--line);
+  padding: 18px 0;
+  overflow-wrap: anywhere;
+}
+.source-record summary {
+  cursor: pointer;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.source-record small {
+  display: block;
+  color: var(--muted);
+  font-weight: 400;
+}
+.source-record pre,
+.beta-panel pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+  font-size: 14px;
+  max-height: 450px;
+  overflow: auto;
+  background: var(--raised);
+  padding: 16px;
+}
+.source-record blockquote {
+  border-left: 2px solid var(--ink);
+  padding-left: 20px;
+  margin: 18px 0;
+}
+.beta-number {
+  display: block;
+  font-size: 36px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  margin: 12px 0;
+}
+.asset-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 16px;
+}
+.asset-list figure {
+  margin: 0;
+  min-width: 0;
+}
+.asset-list img {
+  width: 100%;
+  height: 160px;
+  object-fit: cover;
+}
+.asset-list figcaption {
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.studio-layout {
+  display: grid;
+  grid-template-columns: 150px minmax(240px, 1fr) minmax(220px, 320px);
+  gap: 20px;
+  align-items: start;
+}
+.slide-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.slide-list button {
+  text-align: left;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.slide-list [aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--ground);
+}
+.slide-preview {
+  container-type: inline-size;
+  overflow: hidden;
+}
+
+.slide-controls {
+  display: grid;
+  gap: 10px;
+}
+.slide-controls .field {
+  font-size: 13px;
+}
+.owned-creative {
+  max-width: 100%;
+  max-height: 400px;
+  display: block;
+  margin: 16px 0;
+}
+.beta-panel textarea {
+  width: 100%;
+  min-height: 80px;
+}
+.beta-panel h4 {
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.beta-panel .button {
+  justify-self: start;
+}
+.beta-panel .field input,
+.beta-panel .field select {
+  max-width: 100%;
+}
+.main {
+  overflow-wrap: break-word;
+}
+.sidebar .workspace-nav {
+  min-height: 100px;
+}
+.beta-panel .table-wrap {
+  max-width: 100%;
+}
+@media (max-width: 1200px) {
+  .studio-layout {
+    grid-template-columns: 120px minmax(0, 1fr);
+  }
+  .slide-controls {
+    grid-column: 1/-1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 800px) {
+  .beta-grid {
+    grid-template-columns: 1fr;
+  }
+  .beta-panel {
+    padding: 20px;
+  }
+  .beta-steps {
+    gap: 12px;
+    font-size: 12px;
+  }
+  .studio-layout {
+    grid-template-columns: 1fr;
+  }
+  .slide-list {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .slide-list button {
+    min-width: 110px;
+  }
+  .slide-controls {
+    grid-template-columns: 1fr;
+  }
+  .beta-number {
+    font-size: 30px;
+  }
+  .beta-panel .section-heading {
+    flex-wrap: wrap;
+  }
+}
+
+.slide-canvas {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4/5;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+.slide-canvas iframe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1080px;
+  max-width: none;
+  height: 1350px;
+  border: 0;
+  display: block;
+  transform-origin: top left;
+  margin: 0;
+}
+.slide-list .button {
+  white-space: normal;
+  min-width: 0;
+  width: 100%;
+  justify-content: flex-start;
+}
+.source-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+.source-choice input {
+  width: auto;
+}

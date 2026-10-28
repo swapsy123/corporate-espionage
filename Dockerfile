@@ -1,21 +1,12 @@
-# Node 24 includes the SQLite runtime used by this application.
-FROM node:24-bookworm-slim AS build
+FROM node:24-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends chromium fonts-liberation ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
-COPY index.html vite.config.js ./
-COPY client ./client
-RUN npm run build && npm prune --omit=dev
-
-FROM node:24-bookworm-slim AS runtime
-ENV NODE_ENV=production PORT=3000 DATABASE_PATH=/var/data/levr.sqlite
-WORKDIR /app
-RUN mkdir -p /var/data && chown node:node /var/data
-COPY --from=build --chown=node:node /app/node_modules ./node_modules
-COPY --from=build --chown=node:node /app/dist ./dist
-COPY --chown=node:node package.json package-lock.json ./
-COPY --chown=node:node server ./server
+COPY --chown=node:node package*.json ./
+RUN --mount=type=secret,id=build_ca,target=/tmp/build-ca.pem \
+    if [ -f /tmp/build-ca.pem ]; then NODE_EXTRA_CA_CERTS=/tmp/build-ca.pem npm ci --include=dev; else npm ci --include=dev; fi
+COPY --chown=node:node . .
+RUN npm run build && mkdir -p /var/data && chown node:node /var/data
+ENV NODE_ENV=production CHROMIUM_PATH=/usr/bin/chromium DATABASE_PATH=/var/data/levr-beta.sqlite
 USER node
 EXPOSE 3000
-VOLUME ["/var/data"]
-CMD ["node", "server/index.js"]
+CMD ["npm","start"]

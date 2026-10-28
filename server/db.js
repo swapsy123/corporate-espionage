@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 const migrations = fileURLToPath(new URL('./migrations/', import.meta.url));
 export const id = () => randomUUID();
 export const now = () => new Date().toISOString();
-export function openDatabase(path = process.env.DATABASE_PATH || './data/levr.sqlite') {
+export function openDatabase(path = process.env.DATABASE_PATH || './data/levr-beta.sqlite') {
   if (path !== ':memory:') mkdirSync(dirname(resolve(path)), {recursive:true,mode:0o700});
   const db = new DatabaseSync(path);
   db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;');
@@ -19,6 +19,7 @@ export function openDatabase(path = process.env.DATABASE_PATH || './data/levr.sq
   }
   // A process does not survive a deployment. Preserve items, mark unfinished work honestly.
   db.prepare("UPDATE refreshes SET status='failed',finished_at=?,error='Refresh interrupted by a server restart. Run manual refresh again.' WHERE status='running'").run(now());
+  db.prepare("UPDATE sync_runs SET status='failed',finished_at=?,error='Import interrupted by restart. Retry manually; previous records are preserved.' WHERE status='running'").run(now());
   return db;
 }
 export function seedCompetitors(db) {

@@ -1,0 +1,22 @@
+/* Reusable starting styles; supply locally verified fonts and adjust per photo. */
+:root { --serif: Didot, 'Bodoni MT', Georgia, serif; --sans: Arial, sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+.slide { position: relative; width: 1080px; height: 1350px; overflow: hidden; background: #171717; color: white; }
+.photo, .shade, .collage { position: absolute; inset: 0; width: 100%; height: 100%; }
+.photo, .collage img { object-fit: cover; }
+.shade { background: linear-gradient(90deg, rgba(0,0,0,.58), rgba(0,0,0,.12) 70%); }
+.content { position: relative; z-index: 1; padding: 90px 75px; }
+.headline { margin: 0 0 42px; font: 104px/.96 var(--serif); font-weight: 400; letter-spacing: -3px; max-width: 780px; }
+.body { max-width: 400px; font: 34px/1.3 var(--sans); letter-spacing: -.6px; }
+.body p { margin: 0 0 38px; }
+.rule { border: 0; height: 2px; width: 194px; background: white; margin: 44px 0; }
+.takeaway { max-width: 460px; font: 44px/1.08 var(--serif); }
+.collage { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.collage img { width: 540px; height: 675px; }
+.collage-slide .shade { background: rgba(0,0,0,.22); }
+.collage-slide .content { height: 100%; display: flex; flex-direction: column; justify-content: center; text-align: center; align-items: center; }
+.collage-slide .headline { max-width: 960px; margin-bottom: 20px; }
+.collage-slide .takeaway { max-width: 920px; }
+.action { display: flex; align-items: center; gap: 24px; }
+.action svg { width: 66px; height: 66px; flex: 0 0 auto; }

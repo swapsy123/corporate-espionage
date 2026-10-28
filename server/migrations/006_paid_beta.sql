@@ -1,0 +1,16 @@
+CREATE TABLE beta_settings (key TEXT PRIMARY KEY, data TEXT NOT NULL CHECK(json_valid(data)));
+CREATE TABLE integrations (provider TEXT PRIMARY KEY, account_id TEXT NOT NULL, connected_at TEXT NOT NULL, last_success TEXT, last_error TEXT);
+CREATE TABLE sync_runs (id TEXT PRIMARY KEY, provider TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL, record_count INTEGER DEFAULT 0, error TEXT);
+CREATE TABLE evidence (id TEXT PRIMARY KEY, provider TEXT NOT NULL, external_id TEXT NOT NULL, kind TEXT NOT NULL, occurred_at TEXT, title TEXT NOT NULL, data TEXT NOT NULL CHECK(json_valid(data)), UNIQUE(provider,kind,external_id));
+CREATE INDEX evidence_kind_date ON evidence(kind,occurred_at);
+CREATE TABLE objection_boards (id TEXT PRIMARY KEY,name TEXT NOT NULL,notes TEXT NOT NULL DEFAULT '');
+CREATE TABLE objection_entries (id TEXT PRIMARY KEY,board_id TEXT NOT NULL REFERENCES objection_boards(id),evidence_id TEXT NOT NULL REFERENCES evidence(id),theme TEXT NOT NULL,excerpt TEXT NOT NULL,confirmed INTEGER NOT NULL DEFAULT 0,notes TEXT NOT NULL DEFAULT '',UNIQUE(board_id,evidence_id,theme));
+CREATE TABLE campaigns (id TEXT PRIMARY KEY,title TEXT NOT NULL,board_id TEXT REFERENCES objection_boards(id),data TEXT NOT NULL CHECK(json_valid(data)),stage TEXT NOT NULL DEFAULT 'Draft',revision INTEGER NOT NULL DEFAULT 1,approved_revision INTEGER,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+CREATE TABLE campaign_versions (campaign_id TEXT NOT NULL REFERENCES campaigns(id),revision INTEGER NOT NULL,data TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(campaign_id,revision));
+CREATE TABLE comments (id TEXT PRIMARY KEY,target_type TEXT NOT NULL,target_id TEXT NOT NULL,slide_id TEXT,author TEXT NOT NULL,body TEXT NOT NULL,created_at TEXT NOT NULL);
+CREATE TABLE audit_events (id TEXT PRIMARY KEY,actor TEXT NOT NULL,action TEXT NOT NULL,target_id TEXT NOT NULL,created_at TEXT NOT NULL);
+CREATE TABLE assets (id TEXT PRIMARY KEY,name TEXT NOT NULL,mime TEXT NOT NULL,sha256 TEXT NOT NULL,bytes INTEGER NOT NULL,created_at TEXT NOT NULL,UNIQUE(sha256));
+CREATE TABLE carousels (id TEXT PRIMARY KEY,title TEXT NOT NULL,data TEXT NOT NULL CHECK(json_valid(data)),stage TEXT NOT NULL DEFAULT 'Draft',revision INTEGER NOT NULL DEFAULT 1,approved_revision INTEGER,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+CREATE TABLE outcome_records (evidence_id TEXT PRIMARY KEY REFERENCES evidence(id),data TEXT NOT NULL CHECK(json_valid(data)),updated_at TEXT NOT NULL);
+CREATE TABLE revenue_links (payment_id TEXT PRIMARY KEY REFERENCES evidence(id),opportunity_id TEXT NOT NULL REFERENCES evidence(id),created_at TEXT NOT NULL);
+INSERT INTO objection_boards VALUES ('objections-inbox','Objection inbox','Review suggested objections against the original calls before confirming.');

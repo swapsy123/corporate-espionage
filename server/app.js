@@ -1,4 +1,5 @@
 import express from 'express';
+import {registerBeta} from './beta/routes.js';
 import helmet from 'helmet';
 import {z} from 'zod';
 import {resolve,join} from 'node:path';
@@ -30,13 +31,13 @@ function normalizeIdentifier(platform,raw){
  return v;
 }
 export function createApp(options={}){
- const catalog=options.db||openDatabase();if(options.seed!==false)seedCompetitors(catalog);
+ const catalog=options.db||openDatabase();if(options.seed===true)seedCompetitors(catalog);
  const manager=createWorkspaceManager(catalog,{directory:options.workspaceDirectory}),db=manager.db;
  const vault=options.vault||createSecretVault({directory:options.secretDirectory||manager.secretDirectory||join(tmpdir(),`levr-test-secrets-${id()}`),masterKey:options.secretEncryptionKey,ownerKey:options.providerKey});
  const app=express(),a=auth(catalog,options),collector=options.collector||collectProfile,verifyProvider=options.verifyProvider||verifyProviderAccount;
  app.disable('x-powered-by');if(process.env.TRUST_PROXY==='1')app.set('trust proxy',1);
- app.use(helmet({contentSecurityPolicy:{directives:{defaultSrc:["'self'"],scriptSrc:["'self'"],styleSrc:["'self'","'unsafe-inline'"],fontSrc:["'self'"],imgSrc:["'self'",'https:','data:'],mediaSrc:["'self'",'https:','blob:'],connectSrc:["'self'"],frameSrc:['https://www.youtube-nocookie.com','https://www.youtube.com'],upgradeInsecureRequests:process.env.NODE_ENV==='production'?[]:null}},crossOriginEmbedderPolicy:false}));
- app.use(express.json({limit:'100kb'}));
+ app.use(helmet({contentSecurityPolicy:{directives:{defaultSrc:["'self'"],scriptSrc:["'self'"],styleSrc:["'self'","'unsafe-inline'"],fontSrc:["'self'",'data:'],imgSrc:["'self'",'https:','data:','blob:'],mediaSrc:["'self'",'https:','blob:'],connectSrc:["'self'"],frameSrc:["'self'",'https://www.youtube-nocookie.com','https://www.youtube.com'],upgradeInsecureRequests:process.env.NODE_ENV==='production'?[]:null}},crossOriginEmbedderPolicy:false}));
+ app.use(express.json({limit:'2mb'}));
  app.use((req,res,next)=>{res.setHeader('Cache-Control','no-store');if(!['GET','HEAD','OPTIONS'].includes(req.method)&&req.headers.origin){let origin;try{origin=new URL(req.headers.origin).host;}catch{return res.status(403).json({error:'Invalid request origin.'});}if(origin!==req.get('host'))return res.status(403).json({error:'Cross-site requests are not allowed.'});}next();});
  app.get('/healthz',(req,res)=>res.json({ok:true}));
  app.post('/auth/accept-invite',a.acceptInvite);
@@ -46,13 +47,14 @@ export function createApp(options={}){
  app.get('/api/session',(req,res)=>res.json(a.sessionPayload(req)));
  a.registerManagementRoutes(app);
  app.use('/api',manager.middleware);
+ const beta=registerBeta(app,{db,catalog,manager,options});
  app.get('/api/settings/provider',(req,res)=>res.json(vault.status(req.workspaceId)));
  app.put('/api/settings/provider',async(req,res)=>{const v=z.object({apiKey:z.string().trim().min(1).max(4096).regex(/^[\x21-\x7e]+$/,'Use an API key without spaces or line breaks.')}).parse(req.body);const account=await verifyProvider({apiKey:v.apiKey});res.json({...vault.set(req.workspaceId,v.apiKey,{verifiedAt:now()}),currentCredits:account.creditCount});});
  app.post('/api/settings/provider/verify',async(req,res)=>{const apiKey=vault.get(req.workspaceId);if(!apiKey)return res.status(400).json({error:'Add this workspace’s ScrapeCreators API key before checking the connection.'});const account=await verifyProvider({apiKey});res.json({...vault.markVerified(req.workspaceId,apiKey),currentCredits:account.creditCount});});
  app.delete('/api/settings/provider',(req,res)=>res.json(vault.delete(req.workspaceId)));
  const runningByWorkspace=new Map(),queues=new Map();
  const runningFor=id=>{if(!runningByWorkspace.has(id))runningByWorkspace.set(id,new Set());return runningByWorkspace.get(id);};
- app.get('/api/status',(req,res)=>res.json({providerReady:vault.status(req.workspaceId).configured,aiReady:req.workspaceId==='levr'&&!!process.env.LEVR_AI_API_KEY,workspace:req.workspace,refreshing:runningFor(req.workspaceId).size>0,refreshingCompetitorIds:[...runningFor(req.workspaceId)],eligibleCompetitorCount:db.prepare('SELECT count(*) n FROM competitors c WHERE c.archived=0 AND c.paused=0 AND EXISTS (SELECT 1 FROM profiles p WHERE p.competitor_id=c.id AND p.confirmed=1)').get().n,ownerEmail:req.user.role==='owner'?a.ownerEmail:undefined,counts:{competitors:db.prepare('SELECT count(*) n FROM competitors WHERE archived=0').get().n,ads:db.prepare("SELECT count(*) n FROM items WHERE kind='paid' AND coalesce(json_extract(data,'$.active'),1)=1").get().n,posts:db.prepare("SELECT count(*) n FROM items WHERE kind='organic'").get().n,opportunities:db.prepare('SELECT count(*) n FROM opportunities').get().n}}));
+ app.get('/api/status',(req,res)=>res.json({providerReady:vault.status(req.workspaceId).configured,aiReady:!!process.env.LEVR_AI_API_KEY,workspace:req.workspace,refreshing:runningFor(req.workspaceId).size>0,refreshingCompetitorIds:[...runningFor(req.workspaceId)],eligibleCompetitorCount:db.prepare('SELECT count(*) n FROM competitors c WHERE c.archived=0 AND c.paused=0 AND EXISTS (SELECT 1 FROM profiles p WHERE p.competitor_id=c.id AND p.confirmed=1)').get().n,ownerEmail:req.user.role==='owner'?a.ownerEmail:undefined,counts:{competitors:db.prepare('SELECT count(*) n FROM competitors WHERE archived=0').get().n,ads:db.prepare("SELECT count(*) n FROM items WHERE kind='paid' AND coalesce(json_extract(data,'$.active'),1)=1").get().n,posts:db.prepare("SELECT count(*) n FROM items WHERE kind='organic'").get().n,opportunities:db.prepare('SELECT count(*) n FROM opportunities').get().n}}));
  app.get('/api/competitors',(req,res)=>res.json(competitorRows(db)));
  app.get('/api/profile-candidates',async(req,res)=>{const query=z.string().trim().min(2).max(200).parse(req.query.q);try{res.json(await searchMetaCompanies(query,{apiKey:vault.get(req.workspaceId)||''}));}catch(e){res.status(502).json({error:e.safeMessage||'Profile search is unavailable. Check the provider settings.'});}});
  app.post('/api/competitors',(req,res)=>{const v=z.object({name:text,notes:z.string().max(5000).optional()}).parse(req.body),cid=id();db.prepare('INSERT INTO competitors(id,name,notes) VALUES (?,?,?)').run(cid,v.name,v.notes||'');res.status(201).json(competitorRows(db).find(c=>c.id===cid));});
@@ -108,10 +110,10 @@ export function createApp(options={}){
  app.get('/api/patterns',(req,res)=>{const items=scopedItems(db,req.query.boardId);res.json({...findPatterns(items),scope:req.query.boardId||'library',itemCount:items.length});});
  app.get('/api/briefs',(req,res)=>res.json(db.prepare('SELECT * FROM briefs ORDER BY created_at DESC').all().map(r=>({...JSON.parse(r.data),id:r.id,boardId:r.board_id,format:r.format,createdAt:r.created_at}))));
  app.get('/api/briefs/:id',(req,res)=>{const r=db.prepare('SELECT * FROM briefs WHERE id=?').get(req.params.id);res.status(r?200:404).json(r?{...JSON.parse(r.data),id:r.id,boardId:r.board_id,format:r.format,createdAt:r.created_at}:{error:'Brief not found.'});});
- app.post('/api/briefs',async(req,res)=>{const v=z.object({boardId:text,format:z.enum(['paid_ad','short','carousel','youtube_video']),audience:text,offer:z.string().max(3000).optional(),objective:text}).parse(req.body);const items=scopedItems(db,v.boardId);if(!items.length)return res.status(400).json({error:'Save references to this board before generating a brief.'});const data=await generateBrief({...v,items},req.workspaceId==='levr'?{}:{apiKey:''}),bid=id(),createdAt=now();db.prepare('INSERT INTO briefs VALUES (?,?,?,?,?)').run(bid,v.boardId,v.format,createdAt,JSON.stringify(data));res.status(201).json({...data,id:bid,boardId:v.boardId,format:v.format,createdAt});});
+ app.post('/api/briefs',async(req,res)=>{const v=z.object({boardId:text,format:z.enum(['paid_ad','short','carousel','youtube_video']),audience:text,offer:z.string().max(3000).optional(),objective:text}).parse(req.body);const items=scopedItems(db,v.boardId);if(!items.length)return res.status(400).json({error:'Save references to this board before generating a brief.'});const data=await generateBrief({...v,items},{}),bid=id(),createdAt=now();db.prepare('INSERT INTO briefs VALUES (?,?,?,?,?)').run(bid,v.boardId,v.format,createdAt,JSON.stringify(data));res.status(201).json({...data,id:bid,boardId:v.boardId,format:v.format,createdAt});});
  app.post('/api/ask',async(req,res)=>{const v=z.object({question:z.string().trim().min(2).max(4000),boardId:text.optional()}).parse(req.body);res.json(await askLibrary({items:scopedItems(db,v.boardId),question:v.question}));});
  app.use('/api',(req,res)=>res.status(404).json({error:'Endpoint not found.'}));
  const dist=resolve('dist');if(existsSync(dist)){app.use(express.static(dist,{index:false}));app.get('/{*path}',(req,res)=>res.sendFile(resolve(dist,'index.html')));}
  app.use((err,req,res,next)=>{if(res.headersSent)return next(err);if(err.name==='ProviderConnectionError')return res.status(err.status||502).json({error:err.safeMessage});if(err.name==='SecretVaultError')return res.status(503).json({error:err.safeMessage||'Workspace credential storage is unavailable. Contact Levr.'});if(err instanceof z.ZodError)return res.status(400).json({error:err.issues.map(x=>`${x.path.join('.')}: ${x.message}`).join('; ')});if(err.code?.startsWith('ERR_SQLITE'))return res.status(409).json({error:'This record conflicts with an existing record or a required reference is missing.'});if(err.type==='entity.parse.failed')return res.status(400).json({error:'Request must contain valid JSON.'});res.status(500).json({error:'The operation could not be completed. Previously saved data is preserved.'});});
- return {app,db:catalog,closeWorkspaceDatabases:()=>manager.close(),waitForRefresh:()=>Promise.all([...queues.values()])};
+ return {app,db:catalog,closeWorkspaceDatabases:()=>manager.close(),waitForRefresh:()=>Promise.all([...queues.values(),beta.wait()])};
 }
