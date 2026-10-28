@@ -14,7 +14,7 @@ npm test
 npm start
 ```
 
-Before starting, set `LEVR_OWNER_PASSWORD` to a unique value of at least 16 characters in secure environment settings. Set `SCRAPECREATORS_API_KEY` there for live collection. The only owner is `fraser@wearelevr.com` unless the server-side `OWNER_EMAIL` setting is deliberately changed. `.env.example` documents the settings; no real credential belongs in a tracked file. The application does not automatically load `.env` files. For local development, Node's `--env-file` flag can load a separately created, ignored file; prefer injected settings in managed environments.
+Before starting, set `LEVR_OWNER_PASSWORD` to a unique value of at least 16 characters in secure environment settings. Set `SCRAPECREATORS_API_KEY` there for live collection. The platform owner is `fraser@wearelevr.com` unless the server-side `OWNER_EMAIL` setting is deliberately changed. Clients sign in with their invited email and a password they set themselves. `.env.example` documents the settings; no real credential belongs in a tracked file. The application does not automatically load `.env` files. For local development, Node's `--env-file` flag can load a separately created, ignored file; prefer injected settings in managed environments.
 
 For hot reload, run `npm run dev` for the server and `npm run dev:ui` for the Vite interface in separate terminals. Build before running the standalone production server. The database defaults to `data/levr.sqlite`, which is ignored by Git.
 
@@ -39,3 +39,13 @@ Pattern classifications are evidence-based heuristics. Source captions, transcri
 Run `npm test`, `npm run db:migrate`, and `npm run build`. Review the generated schema in `server/migrations/`. Tests use isolated databases and fixtures; passing them does not establish live provider access or a deployed site.
 
 See [deployment instructions](docs/DEPLOYMENT.md) for Render hosting, the persistent disk, private owner access, secure credential entry, and publication checks. `render.yaml` is a deployment blueprint; saving it creates no hosting account, service, or final URL.
+
+## Private client workspaces
+
+The owner can create client workspaces and generate invitation links under **Clients**. Share each link directly with its intended recipient. Invitations expire after seven days and are accepted once; there is no public registration or automatic email. The owner can revoke pending invites, remove members, and create one-hour password reset links. Existing client accounts use their current password to accept another workspace invitation.
+
+Each client sees only assigned workspaces. The owner can switch into any client workspace. A new client workspace starts empty with its own Creative Inbox. Existing Levr research stays in the original database. Every client database is stored separately in the durable data directory, and every API request checks workspace membership.
+
+Each client connects their own ScrapeCreators account under **Settings**. The field is masked and write-only; saved values are never returned to the browser. Keys are encrypted with AES-256-GCM in separate server files, never in the research databases. Clients never fall back to Levr’s provider key. Render creates `LEVR_SECRET_ENCRYPTION_KEY` when the updated blueprint is synced; keep this value stable. Review [deployment instructions](docs/DEPLOYMENT.md) before upgrading an existing service.
+
+Additional validation: `CHROMIUM_PATH=/usr/bin/chromium node scripts/browser-workspaces.mjs` exercises invitation acceptance and workspace boundaries with isolated test accounts.

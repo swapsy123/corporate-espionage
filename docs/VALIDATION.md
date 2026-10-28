@@ -1,6 +1,22 @@
 # Local validation record
 
-Validated on 27 October 2026 with Node 24 and Chromium. This records local results, not a published site or authenticated provider collection.
+## Client workspaces — 28 October 2026
+
+The existing site is hosted at `https://levr-competitor-analysis.onrender.com`; the owner has confirmed sign-in and competitor refresh work. The client-workspace update below is locally validated and requires a Render Blueprint **Manual Sync** to apply the new encryption setting and deploy. It has not yet been verified on the hosted service.
+
+- All 64 automated tests pass with Node 24. The production client build passes.
+- The legacy single-owner database upgrades through migrations 004 and 005 with existing competitors, profile confirmations, items, opportunities, boards, briefs, and refresh history unchanged. SQLite integrity and migration repeatability pass.
+- Workspace tests cover owner access to every workspace, client membership enforcement, foreign workspace headers and record IDs, isolated research and citations, independent concurrent refresh jobs and provider keys, and persistence across reopening separate database files.
+- Client refreshes fail without that client's configured account; they never fall back to Levr's account. Keys are saved only in authenticated encrypted files outside SQLite. Tests cover filesystem permissions, tampering, wrong encryption keys, file relocation, symlinks, and preserving a prior key after a rejected replacement.
+- Invitation and recovery tests cover email binding, expiration, one-time use, purpose separation, CSRF, owner-only management, password hashes, session revocation, and permanent revocation of pending reset links when membership is removed.
+- Desktop/mobile Chromium smoke and refresh regressions pass. The workspace browser workflow covers workspace creation, invitation acceptance, masked key setup, owner switching, discarded delayed responses from the prior workspace, rejected foreign workspace access, password recovery, and member revocation. No browser JavaScript errors or horizontal overflow were observed; screenshots were inspected.
+- Tests use isolated synthetic fixtures and randomly generated test credentials. They do not validate an actual client's provider account, credits, or live collection. That check requires the client to connect their key and manually refresh a confirmed profile after deployment.
+
+Commands: `npm test`, `npm run db:migrate`, `npm run build`, `CHROMIUM_PATH=/usr/bin/chromium node scripts/browser-smoke.mjs`, `CHROMIUM_PATH=/usr/bin/chromium node scripts/browser-refresh.mjs`, and `CHROMIUM_PATH=/usr/bin/chromium node scripts/browser-workspaces.mjs`.
+
+## Initial implementation — historical record
+
+Validated on 27 October 2026 with Node 24 and Chromium. The following records the initial local results before deployment.
 
 - Frozen installation (`npm ci`), both SQL migrations, SQLite integrity check, and production client build passed.
 - 35 automated tests passed: owner authentication, CSRF and unauthorized requests; candidate profile confirmation; manual refresh and duplicate rejection; Meta ad-ID deduplication; failed/malformed refresh preservation; all five organic rankings; missing metrics/transcripts; opportunities, tags, ratings and every stage; library/board patterns; four brief formats and saved readback; citations resolving to stored items; SQLite reopen persistence; safe provider failures and pagination.

@@ -40,7 +40,7 @@ try {
     if(competitorReads>=3)finishPollCheck();
   });
   await page.goto(`${base}/competitors`);
-  await page.getByLabel('Password',{exact:true}).fill(password);
+  await page.getByLabel('Email address',{exact:true}).fill('fraser@wearelevr.com');await page.getByLabel('Password',{exact:true}).fill(password);
   await page.getByRole('button',{name:'Enter workspace'}).click();
   await page.getByRole('heading',{name:'A confirmed competitor',exact:true}).waitFor();
   const card=await page.locator('.competitor-card').first().elementHandle();
