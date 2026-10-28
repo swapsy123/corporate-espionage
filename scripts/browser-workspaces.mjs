@@ -10,7 +10,7 @@ import {createApp} from '../server/app.js';
 import {openDatabase} from '../server/db.js';
 const secretDirectory=mkdtempSync(join(tmpdir(),'levr-ui-vault-'));
 const db=openDatabase(':memory:'),password=randomBytes(24).toString('hex'),clientPassword=randomBytes(24).toString('hex');
-const created=createApp({db,seed:false,password,production:false,secretDirectory,secretEncryptionKey:randomBytes(32).toString('hex')});
+const created=createApp({db,seed:false,password,production:false,secretDirectory,secretEncryptionKey:randomBytes(32).toString('hex'),verifyProvider:async({apiKey})=>{if(apiKey==='invalid-browser-key')throw new Error('Synthetic rejection');return {creditCount:100};}});
 db.prepare('INSERT INTO competitors(id,name) VALUES (?,?)').run('owner-record','Levr private competitor');
 const server=created.app.listen(0,'127.0.0.1');await once(server,'listening');
 const base=`http://127.0.0.1:${server.address().port}`;
@@ -31,18 +31,25 @@ try {
  const client=await browser.newPage({viewport:{width:390,height:844}});client.on('pageerror',e=>errors.push(e.message));
  const inviteRequests=[];client.on('request',r=>{if(new URL(r.url()).pathname==='/invite')inviteRequests.push(r.url())});
  await client.goto(inviteUrl);await client.getByRole('heading',{name:'Your research starts here.'}).waitFor();assert.equal(new URL(client.url()).hash,'');assert.ok(inviteRequests.every(url=>!url.includes('token')));
- await client.getByLabel('Invited email address').fill('alpha@example.test');await client.getByLabel('Password',{exact:true}).fill(clientPassword);await client.getByLabel('Confirm password',{exact:true}).fill(clientPassword);await client.getByRole('button',{name:'Accept invitation',exact:true}).click();await client.getByRole('heading',{name:'Your market, in focus.'}).waitFor();
+ await client.getByLabel('Invited email address').fill('alpha@example.test');await client.getByLabel('Password',{exact:true}).fill(clientPassword);await client.getByLabel('Confirm password',{exact:true}).fill(clientPassword);await client.getByRole('button',{name:'Accept invitation',exact:true}).click();await client.getByRole('heading',{name:'Your research connection.'}).waitFor();assert.equal(new URL(client.url()).pathname,'/settings','signup opens workspace settings');
  assert.equal(await client.getByRole('link',{name:'Client workspaces',exact:true}).count(),0);
  assert.equal(await client.getByText('fraser@wearelevr.com',{exact:true}).count(),0);
  assert.equal(await client.getByLabel('Current workspace').locator('option').count(),1);
  assert.equal(await client.getByLabel('Current workspace').locator('option').textContent(),'Client Alpha');
- await client.goto(base+'/settings');await client.getByRole('heading',{name:'Your research connection.'}).waitFor();
+ await client.getByRole('heading',{name:'Connect your research account',exact:true}).waitFor();
+ assert.equal(await client.getByRole('link',{name:'Sign in to ScrapeCreators',exact:true}).getAttribute('href'),'https://app.scrapecreators.com');
+ const screenshots=client.locator('.setup-screenshot img');assert.equal(await screenshots.count(),2);for(const img of await screenshots.all()){await img.scrollIntoViewIfNeeded();await img.evaluate(async element=>{await element.decode()});assert.ok(await img.evaluate(element=>element.naturalWidth)>0)}
+ assert.equal(await client.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'setup guide fits mobile');await client.screenshot({path:'/tmp/levr-setup-guide-mobile.png',fullPage:true});
+ await client.getByLabel('ScrapeCreators API key',{exact:true}).fill('invalid-browser-key');await client.getByRole('button',{name:'Connect ScrapeCreators',exact:true}).click();await client.getByRole('alert').waitFor();assert.equal(await client.getByRole('heading',{name:'Connect your research account',exact:true}).count(),1,'rejected key keeps setup guide');assert.equal(await client.getByLabel('ScrapeCreators API key',{exact:true}).inputValue(),'');
  const apiKey='synthetic-browser-key-'+randomBytes(10).toString('hex');
- await client.getByLabel('ScrapeCreators API key',{exact:true}).fill(apiKey);await client.getByRole('button',{name:'Save research account',exact:true}).click();
- await client.getByText('Account configured',{exact:true}).waitFor();assert.equal(await client.getByLabel('Replacement API key',{exact:true}).inputValue(),'');assert.equal((await client.content()).includes(apiKey),false);
+ await client.getByLabel('ScrapeCreators API key',{exact:true}).fill(apiKey);await client.getByRole('button',{name:'Connect ScrapeCreators',exact:true}).click();
+ await client.getByText('Connected',{exact:true}).waitFor();assert.equal(await client.getByLabel('Replacement API key',{exact:true}).inputValue(),'');assert.equal((await client.content()).includes(apiKey),false);assert.equal(await client.locator('.setup-guide').count(),0,'verified connection hides setup');
+ await client.reload();await client.getByText('Connected',{exact:true}).waitFor();assert.equal(await client.locator('.setup-guide').count(),0,'setup stays hidden after reload');
+ await client.getByRole('button',{name:'Remove saved key',exact:true}).click();await client.getByRole('button',{name:'Remove saved key',exact:true}).last().click();await client.getByRole('heading',{name:'Connect your research account',exact:true}).waitFor();
+ await client.getByLabel('ScrapeCreators API key',{exact:true}).fill(apiKey);await client.getByRole('button',{name:'Connect ScrapeCreators',exact:true}).click();await client.getByText('Connected',{exact:true}).waitFor();
  assert.equal(await client.evaluate(()=>localStorage.length),0);assert.equal(await client.evaluate(()=>sessionStorage.length),0);
  assert.equal(await client.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'workspace settings fits mobile');await client.screenshot({path:'/tmp/levr-client-settings-mobile.png',fullPage:true});
- await client.goto(base+'/competitors');await client.getByRole('button',{name:'Add competitor',exact:true}).click();await client.getByLabel('Competitor name',{exact:true}).fill('Alpha private competitor');await client.getByRole('button',{name:'Save competitor',exact:true}).click();await client.getByRole('heading',{name:'Alpha private competitor',exact:true}).waitFor();assert.equal(await client.getByText('Levr private competitor',{exact:true}).count(),0);
+ await client.getByRole('button',{name:'Set up competitors',exact:true}).click();await client.getByRole('button',{name:'Add competitor',exact:true}).click();await client.getByLabel('Competitor name',{exact:true}).fill('Alpha private competitor');await client.getByRole('button',{name:'Save competitor',exact:true}).click();await client.getByRole('heading',{name:'Alpha private competitor',exact:true}).waitFor();assert.equal(await client.getByText('Levr private competitor',{exact:true}).count(),0);
  const spaces=await owner.evaluate(async()=>await(await fetch('/api/workspaces')).json());const alpha=spaces.find(w=>w.name==='Client Alpha'),beta=spaces.find(w=>w.name==='Client Beta');
  await owner.getByLabel('Current workspace').selectOption(alpha.id);await owner.goto(base+'/competitors');
  // Session defaults on full reload are Levr; select Alpha again to enter its research.
@@ -67,5 +74,5 @@ try {
  assert.equal(await recovered.getByText('Alpha private competitor',{exact:true}).count(),0);
 
  assert.deepEqual(errors,[]);
- console.log(JSON.stringify({ok:true,checks:['owner creates private workspace and invite','invitation fragment is not sent to server','client accepts with own password','client has only assigned workspace and no owner controls','masked key save and no browser storage','owner can manage all isolated research','delayed prior-workspace response discarded','foreign workspace denied','owner-issued password recovery revokes old sessions','revocation signs out and clears private UI'],errors}));
+ console.log(JSON.stringify({ok:true,checks:['owner creates private workspace and invite','invitation fragment is not sent to server','signup opens workspace settings','setup link and screenshot assets work','invalid key retains guide','verified connection hides guide across reload','disconnect restores guide','client has only assigned workspace and no owner controls','masked key save and no browser storage','owner can manage all isolated research','delayed prior-workspace response discarded','foreign workspace denied','owner-issued password recovery revokes old sessions','revocation signs out and clears private UI'],errors}));
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));created.closeWorkspaceDatabases();db.close();rmSync(secretDirectory,{recursive:true,force:true});}

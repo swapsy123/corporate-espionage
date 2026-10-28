@@ -81,7 +81,7 @@ test('existing accounts must prove their password to accept another workspace in
  assert.equal((await s.session().accept(second,'client@example.com',newPassword)).status,400);
  assert.equal(s.db.prepare('SELECT accepted_at FROM invites WHERE id=?').get(second.id).accepted_at,null);
  assert.equal((await s.session().login('client@example.com',newPassword)).status,401);
- const accepted=await client.accept(second,'client@example.com',password);assert.equal(accepted.status,200);assert.equal(accepted.data.workspaces.length,2);assert.equal(s.db.prepare('SELECT count(*) n FROM users').get().n,1);
+ const accepted=await client.accept(second,'client@example.com',password);assert.equal(accepted.status,200);assert.equal(accepted.data.workspaces.length,2);assert.equal(accepted.data.defaultWorkspaceId,b.id,'invitation opens the workspace just accepted');assert.equal(s.db.prepare('SELECT count(*) n FROM users').get().n,1);
 });
 
 test('revoked membership invalidates sessions without deleting research or other memberships',async t=>{

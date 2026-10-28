@@ -11,7 +11,7 @@ Creating a hosting account, connecting GitHub, and entering deployment secrets r
 3. Verify that the variable is present in Render's Environment settings without exposing its value. Preserve an existing value. **Manual Deploy alone does not apply a new blueprint environment-variable declaration.** If the variable is absent, sync the blueprint or create it through Render's secure settings with a unique random value of at least 32 characters.
 4. If blueprint sync does not start deployment, choose **Manual Deploy → Deploy latest commit**. Wait for the service to show **Live**. Automatic deployment is disabled in the blueprint.
 5. Sign in as the owner and verify that the original Levr library remains available. Create a client workspace, create an invitation for its intended email address, and copy the invitation link to the client through your chosen private channel. The app does not send invitation emails.
-6. After the client accepts the invitation and sets a password, they open **Settings** in their workspace and enter their own ScrapeCreators key in the masked field. Only configuration status is displayed after saving. Confirm a public profile and run one manual refresh to validate that client's provider access.
+6. After the client accepts the invitation and sets a password, **Workspace settings** opens automatically. The setup guide links to their ScrapeCreators account and shows how to connect. They enter their own key in the masked field and select **Connect ScrapeCreators**. Levr checks account access before saving; the guide disappears only after verification. Confirm a public profile and run one manual refresh to validate collection with that account.
 
 Client workspaces never fall back to Levr's ScrapeCreators account or credits. A client without its own configured key can use its existing saved research, but cannot collect new content. New client workspaces start with an empty library and a Creative Inbox; Levr's competitor list, notes, boards, briefs, and collected data are not copied into them.
 
@@ -45,6 +45,8 @@ A successful build or `/healthz` response alone does not verify provider collect
 The local cloud environment's secret-proxy bindings do not automatically configure Render. Add deployment credentials through Render's secure settings. ScrapeCreators collection needs HTTPS access to `api.scrapecreators.com`; optional AI needs `api.openai.com`. Original creative viewers access public provider/CDN URLs in the browser and may depend on provider availability or expiring media URLs.
 
 API keys are never returned from Settings, embedded in browser bundles, written to SQL, or included in diagnostic responses. The masked setup field sends a newly entered client key over HTTPS to the server. It is encrypted into a workspace-specific file outside the database, and the interface clears the entered value after saving. Do not use a `VITE_` prefix for any secret.
+
+The guided-setup update needs no additional environment variables or SQL migration once client workspaces are deployed. Use **Manual Deploy → Deploy latest commit**. Existing encrypted keys remain readable and can be verified in Settings without re-entering them. Verification dates are stored inside the encrypted key file; Levr's environment-key verification is held in memory and needs rechecking after a restart. Verification checks account access, not the success of future content collection or available future credits.
 
 ## Durable data and maintenance
 

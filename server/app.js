@@ -10,6 +10,7 @@ import {createWorkspaceManager} from './workspaces.js';
 import {createSecretVault} from './secret-vault.js';
 import {competitorRows,profileRow,itemRows,persistProfileItems,boardRows,opportunityRows,scopedItems} from './store.js';
 import {collectProfile,searchMetaCompanies} from './provider.js';
+import {verifyProviderAccount} from './provider-connection.js';
 import {findPatterns,generateBrief,askLibrary} from './intelligence.js';
 const text=z.string().trim().min(1).max(500);
 const stages=z.enum(['Saved','Briefing','Creating','Launched','Winner']);
@@ -32,7 +33,7 @@ export function createApp(options={}){
  const catalog=options.db||openDatabase();if(options.seed!==false)seedCompetitors(catalog);
  const manager=createWorkspaceManager(catalog,{directory:options.workspaceDirectory}),db=manager.db;
  const vault=options.vault||createSecretVault({directory:options.secretDirectory||manager.secretDirectory||join(tmpdir(),`levr-test-secrets-${id()}`),masterKey:options.secretEncryptionKey,ownerKey:options.providerKey});
- const app=express(),a=auth(catalog,options),collector=options.collector||collectProfile;
+ const app=express(),a=auth(catalog,options),collector=options.collector||collectProfile,verifyProvider=options.verifyProvider||verifyProviderAccount;
  app.disable('x-powered-by');if(process.env.TRUST_PROXY==='1')app.set('trust proxy',1);
  app.use(helmet({contentSecurityPolicy:{directives:{defaultSrc:["'self'"],scriptSrc:["'self'"],styleSrc:["'self'","'unsafe-inline'"],fontSrc:["'self'"],imgSrc:["'self'",'https:','data:'],mediaSrc:["'self'",'https:','blob:'],connectSrc:["'self'"],frameSrc:['https://www.youtube-nocookie.com','https://www.youtube.com'],upgradeInsecureRequests:process.env.NODE_ENV==='production'?[]:null}},crossOriginEmbedderPolicy:false}));
  app.use(express.json({limit:'100kb'}));
@@ -46,7 +47,8 @@ export function createApp(options={}){
  a.registerManagementRoutes(app);
  app.use('/api',manager.middleware);
  app.get('/api/settings/provider',(req,res)=>res.json(vault.status(req.workspaceId)));
- app.put('/api/settings/provider',(req,res)=>{const v=z.object({apiKey:z.string().trim().min(1).max(4096)}).parse(req.body);res.json(vault.set(req.workspaceId,v.apiKey));});
+ app.put('/api/settings/provider',async(req,res)=>{const v=z.object({apiKey:z.string().trim().min(1).max(4096).regex(/^[\x21-\x7e]+$/,'Use an API key without spaces or line breaks.')}).parse(req.body);const account=await verifyProvider({apiKey:v.apiKey});res.json({...vault.set(req.workspaceId,v.apiKey,{verifiedAt:now()}),currentCredits:account.creditCount});});
+ app.post('/api/settings/provider/verify',async(req,res)=>{const apiKey=vault.get(req.workspaceId);if(!apiKey)return res.status(400).json({error:'Add this workspace’s ScrapeCreators API key before checking the connection.'});const account=await verifyProvider({apiKey});res.json({...vault.markVerified(req.workspaceId,apiKey),currentCredits:account.creditCount});});
  app.delete('/api/settings/provider',(req,res)=>res.json(vault.delete(req.workspaceId)));
  const runningByWorkspace=new Map(),queues=new Map();
  const runningFor=id=>{if(!runningByWorkspace.has(id))runningByWorkspace.set(id,new Set());return runningByWorkspace.get(id);};
@@ -110,6 +112,6 @@ export function createApp(options={}){
  app.post('/api/ask',async(req,res)=>{const v=z.object({question:z.string().trim().min(2).max(4000),boardId:text.optional()}).parse(req.body);res.json(await askLibrary({items:scopedItems(db,v.boardId),question:v.question}));});
  app.use('/api',(req,res)=>res.status(404).json({error:'Endpoint not found.'}));
  const dist=resolve('dist');if(existsSync(dist)){app.use(express.static(dist,{index:false}));app.get('/{*path}',(req,res)=>res.sendFile(resolve(dist,'index.html')));}
- app.use((err,req,res,next)=>{if(res.headersSent)return next(err);if(err.name==='SecretVaultError')return res.status(503).json({error:err.safeMessage||'Workspace credential storage is unavailable. Contact Levr.'});if(err instanceof z.ZodError)return res.status(400).json({error:err.issues.map(x=>`${x.path.join('.')}: ${x.message}`).join('; ')});if(err.code?.startsWith('ERR_SQLITE'))return res.status(409).json({error:'This record conflicts with an existing record or a required reference is missing.'});if(err.type==='entity.parse.failed')return res.status(400).json({error:'Request must contain valid JSON.'});res.status(500).json({error:'The operation could not be completed. Previously saved data is preserved.'});});
+ app.use((err,req,res,next)=>{if(res.headersSent)return next(err);if(err.name==='ProviderConnectionError')return res.status(err.status||502).json({error:err.safeMessage});if(err.name==='SecretVaultError')return res.status(503).json({error:err.safeMessage||'Workspace credential storage is unavailable. Contact Levr.'});if(err instanceof z.ZodError)return res.status(400).json({error:err.issues.map(x=>`${x.path.join('.')}: ${x.message}`).join('; ')});if(err.code?.startsWith('ERR_SQLITE'))return res.status(409).json({error:'This record conflicts with an existing record or a required reference is missing.'});if(err.type==='entity.parse.failed')return res.status(400).json({error:'Request must contain valid JSON.'});res.status(500).json({error:'The operation could not be completed. Previously saved data is preserved.'});});
  return {app,db:catalog,closeWorkspaceDatabases:()=>manager.close(),waitForRefresh:()=>Promise.all([...queues.values()])};
 }

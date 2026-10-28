@@ -1,5 +1,14 @@
 # Local validation record
 
+## Guided account setup — 28 October 2026
+
+- All 70 automated tests pass; the production client build passes. No SQL migration or new deployment variable is required for this update.
+- Invitation acceptance opens Workspace settings for the accepted workspace, including existing clients joining another workspace. Password-reset navigation remains unchanged.
+- The isolated Chromium workspace workflow verifies the sign-in link and image assets, mobile layout, rejected-key errors, persistent dismissal after a verified connection, restoration after key removal, and the continuation to competitor setup. No JavaScript errors or horizontal overflow were observed.
+- Server tests verify the documented account-balance request, zero-credit accounts, sanitized rejected/malformed/unreachable responses, authentication and workspace boundaries, preservation of prior credentials on failure, and no provider requests during status polling. Version-1 encrypted keys remain readable; version-2 verification metadata persists encrypted.
+- Two actual Levr interface screenshots were captured and inspected. Their synthetic fixture provenance and regeneration script are recorded in `docs/SETUP_SCREENSHOTS.md`. ScrapeCreators account/dashboard screenshots could not be captured because the environment proxy denied website access. The external steps use text and the official account link, without fabricated screenshots.
+- Account API and account-link contracts were checked against the official ScrapeCreators CLI package. Live authenticated account verification and deployment remain unverified; publishing still requires Render's manual deployment flow.
+
 ## Client workspaces — 28 October 2026
 
 The existing site is hosted at `https://levr-competitor-analysis.onrender.com`; the owner has confirmed sign-in and competitor refresh work. The client-workspace update below is locally validated and requires a Render Blueprint **Manual Sync** to apply the new encryption setting and deploy. It has not yet been verified on the hosted service.

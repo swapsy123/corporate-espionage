@@ -97,7 +97,7 @@ export function auth(db,options={}){
    db.prepare('INSERT INTO memberships(workspace_id,user_id,created_at) VALUES (?,?,?) ON CONFLICT(workspace_id,user_id) DO NOTHING').run(invite.workspace_id,userId,timestamp);
    db.exec('COMMIT');
   }catch(error){db.exec('ROLLBACK');throw error;}
-  res.json(issueSession(req,res,{id:userId,email,role:'client'}));
+  res.json({...issueSession(req,res,{id:userId,email,role:'client'}),defaultWorkspaceId:invite.workspace_id});
  }
  function resetPassword(req,res){
   const rate=rateLimit(req,res);if(!rate)return;

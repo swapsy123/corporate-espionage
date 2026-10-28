@@ -2,7 +2,15 @@
 
 The server adapter uses the official public API contract distributed in `@scrapecreators/cli@1.0.87`, specifically its `api-config/apis.js`, `api-config/instagram-apis.js`, and transcript documentation. Package provenance: https://github.com/ScrapeCreators/scrapecreators-cli and https://www.npmjs.com/package/@scrapecreators/cli. No third-party wrapper is executed or installed as an application dependency. Source lookup used the npm registry because the onboarding machine's egress proxy denied access to the documentation site.
 
-Every request is server-side to `https://api.scrapecreators.com`, with the `x-api-key` header taken from `SCRAPECREATORS_API_KEY`. Redirects are rejected, timeouts and response size limits are enforced, and upstream response bodies are never surfaced as errors. Store the key only in the deployment secret settings. No key is needed by the browser. Deployments behind an HTTP proxy should run Node 24 with `NODE_USE_ENV_PROXY=1` or `--use-env-proxy` as appropriate to their platform.
+Every request is server-side to `https://api.scrapecreators.com`, with the `x-api-key` header taken from the authorized workspace's encrypted credential. The original Levr workspace alone can use the `SCRAPECREATORS_API_KEY` environment fallback. Redirects are rejected, timeouts and response size limits are enforced, and upstream response bodies are never surfaced as errors. The browser's masked setup field submits a key once; saved keys are never returned to the browser. Deployments behind an HTTP proxy should run Node 24 with `NODE_USE_ENV_PROXY=1` or `--use-env-proxy` as appropriate to their platform.
+
+## Account connection
+
+The official CLI's account contract documents `GET /v1/account/credit-balance` with `x-api-key` and a numeric `creditCount` response. The server uses this endpoint to verify new keys before replacing an existing credential. A zero balance verifies identity but is shown with a prompt to add credits before collection. Requests have a 15-second timeout, reject redirects, and limit response size to 64 KiB.
+
+`POST /api/settings/provider/verify` checks an already saved key. Authentication, CSRF and workspace authorization apply to both connection routes. Status polling never calls ScrapeCreators. Client verification timestamps persist inside the authenticated encrypted credential envelope; legacy version-1 envelopes remain readable until verified and rewritten as version 2. Failed verification preserves existing credentials and research.
+
+The account/sign-in link `https://app.scrapecreators.com` is documented by the official CLI README. The setup guide's images are actual Levr interface screenshots with isolated fixtures. ScrapeCreators website access was blocked by this environment's proxy, so the external account/key steps use text rather than unverified third-party screenshots.
 
 ## Confirmed source identifiers
 

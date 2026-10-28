@@ -55,51 +55,63 @@ export function createSecretVault({directory,masterKey=process.env.LEVR_SECRET_E
   const storageDirectory=resolve(directory||join(dirname(resolve(process.env.DATABASE_PATH||'./data/levr.sqlite')),'secrets'));
   const encryptionKey=typeof masterKey==='string'&&masterKey.length>=32?createHash('sha256').update(masterKey).digest():null;
   const fallback=typeof ownerKey==='string'&&ownerKey.length?ownerKey:null;
+  let ownerVerifiedAt=null;
+  const fallbackRecord=workspaceId=>({key:workspaceId==='levr'?fallback:null,source:workspaceId==='levr'&&fallback?'environment':null,verifiedAt:workspaceId==='levr'&&fallback?ownerVerifiedAt:null});
   const pathFor=workspaceId=>{validateWorkspace(workspaceId);return join(storageDirectory,`${workspaceId}.json`);};
   function read(workspaceId){
     const path=pathFor(workspaceId);
     let fd;
     try{
-      if(!inspectDirectory(storageDirectory))return {key:workspaceId==='levr'?fallback:null,source:workspaceId==='levr'&&fallback?'environment':null};
-      if(!inspectFile(path))return {key:workspaceId==='levr'?fallback:null,source:workspaceId==='levr'&&fallback?'environment':null};
+      if(!inspectDirectory(storageDirectory))return fallbackRecord(workspaceId);
+      if(!inspectFile(path))return fallbackRecord(workspaceId);
       if(!encryptionKey)throw new SecretVaultError(CONFIG_ERROR);
       fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);
       const stat=fstatSync(fd);
       if(!stat.isFile()||stat.nlink!==1||stat.size>MAX_ENVELOPE_BYTES||(stat.mode&0o077)!==0)throw new Error('Invalid credential file');
       const envelope=JSON.parse(readFileSync(fd,'utf8'));
-      if(envelope.version!==1)throw new Error('Unsupported credential envelope');
+      if(![1,2].includes(envelope.version))throw new Error('Unsupported credential envelope');
       const iv=decode(envelope.iv,12),tag=decode(envelope.tag,16),ciphertext=decode(envelope.ciphertext);
       const decipher=createDecipheriv('aes-256-gcm',encryptionKey,iv);
-      decipher.setAAD(Buffer.from(workspaceId,'utf8'));
+      decipher.setAAD(Buffer.from(envelope.version===1?workspaceId:`${workspaceId}\n2`,'utf8'));
       decipher.setAuthTag(tag);
       const value=Buffer.concat([decipher.update(ciphertext),decipher.final()]).toString('utf8');
-      validateCredential(value);
-      return {key:value,source:'workspace'};
+      const record=envelope.version===1?{apiKey:value,verifiedAt:null}:JSON.parse(value);
+      validateCredential(record.apiKey);
+      if(record.verifiedAt!==null&&(typeof record.verifiedAt!=='string'||!Number.isFinite(Date.parse(record.verifiedAt))))throw Error('Invalid verification date');
+      return {key:record.apiKey,source:'workspace',verifiedAt:record.verifiedAt};
     }catch(error){if(error instanceof SecretVaultError&&error.message===CONFIG_ERROR)throw error;throw new SecretVaultError(READ_ERROR);}
     finally{if(fd!==undefined)closeSync(fd);}
   }
-  function status(workspaceId){const value=read(workspaceId);return {configured:!!value.key,storageReady:!!encryptionKey,source:value.source};}
-  function set(workspaceId,apiKey){
+  function status(workspaceId){const value=read(workspaceId);return {configured:!!value.key,storageReady:!!encryptionKey,source:value.source,verified:!!value.verifiedAt,verifiedAt:value.verifiedAt};}
+  function set(workspaceId,apiKey,{verifiedAt=null}={}){
     const path=pathFor(workspaceId);validateCredential(apiKey);
     if(!encryptionKey)throw new SecretVaultError(CONFIG_ERROR);
+    if(verifiedAt!==null&&(typeof verifiedAt!=='string'||!Number.isFinite(Date.parse(verifiedAt))))throw new SecretVaultError('The connection verification date is invalid.');
     let fd,temp;
     try{
       inspectDirectory(storageDirectory,true);inspectFile(path);
       const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',encryptionKey,iv);
-      cipher.setAAD(Buffer.from(workspaceId,'utf8'));
-      const ciphertext=Buffer.concat([cipher.update(apiKey,'utf8'),cipher.final()]);
-      const envelope=JSON.stringify({version:1,iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),ciphertext:ciphertext.toString('base64')});
+      cipher.setAAD(Buffer.from(`${workspaceId}\n2`,'utf8'));
+      const ciphertext=Buffer.concat([cipher.update(JSON.stringify({apiKey,verifiedAt}),'utf8'),cipher.final()]);
+      const envelope=JSON.stringify({version:2,iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),ciphertext:ciphertext.toString('base64')});
       temp=join(storageDirectory,`${workspaceId}.${randomBytes(12).toString('hex')}.tmp`);
       fd=openSync(temp,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);
       writeFileSync(fd,envelope,'utf8');fsyncSync(fd);closeSync(fd);fd=undefined;
       inspectFile(path);renameSync(temp,path);temp=undefined;
       syncDirectory(storageDirectory);
-      return {configured:true,storageReady:true,source:'workspace'};
+      return {configured:true,storageReady:true,source:'workspace',verified:!!verifiedAt,verifiedAt};
     }catch{throw new SecretVaultError(WRITE_ERROR);}
     finally{
       if(fd!==undefined)closeSync(fd);
       if(temp){try{unlinkSync(temp);}catch{ /* Ciphertext-only temporary artifact; never log a path. */ }}
     }
+  }
+  function markVerified(workspaceId,expectedKey){
+    const current=read(workspaceId);
+    if(!current.key||current.key!==expectedKey)throw new SecretVaultError('The saved account changed while it was being checked. Check the current connection again.');
+    const verifiedAt=new Date().toISOString();
+    if(current.source==='environment'){ownerVerifiedAt=verifiedAt;return status(workspaceId);}
+    return set(workspaceId,expectedKey,{verifiedAt});
   }
   function remove(workspaceId){
     const path=pathFor(workspaceId);
@@ -108,5 +120,5 @@ export function createSecretVault({directory,masterKey=process.env.LEVR_SECRET_E
     }catch{throw new SecretVaultError('The workspace credential could not be removed. Ask Levr to check secure storage settings.');}
     return status(workspaceId);
   }
-  return {status,get:workspaceId=>read(workspaceId).key,set,delete:remove};
+  return {status,get:workspaceId=>read(workspaceId).key,set,markVerified,delete:remove};
 }

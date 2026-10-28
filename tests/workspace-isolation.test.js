@@ -29,7 +29,7 @@ async function setup(t,{withCollector=true,durable=false}={}){
   const item={externalId:profile.platform==='meta'?'123456789':'shared-post',kind:profile.platform==='meta'?'paid':'organic',format:profile.platform==='meta'?'ad_video':'instagram_reel',title:label,caption:`Stop wasting content. ${label}. Book a call.`,transcript:`Stop wasting content. ${label}. Book a call.`,transcriptStatus:'available',sourceUrl:profile.platform==='meta'?'https://www.facebook.com/ads/library/?id=123456789':'https://www.instagram.com/reel/shared-post/',media:[],active:true,startDate:'2026-01-01',publishedAt:'2026-01-01',views:100,likes:10,comments:2,shares:1};
   return {items:[item],complete:true};
  };
- const created=createApp({db,seed:false,password:ownerPassword,production:false,ownerEmail:'fraser@wearelevr.com',vault,...(withCollector?{collector}:{})});
+ const created=createApp({db,seed:false,password:ownerPassword,production:false,ownerEmail:'fraser@wearelevr.com',vault,verifyProvider:async()=>({creditCount:100}),...(withCollector?{collector}:{})});
  const server=created.app.listen(0,'127.0.0.1');await once(server,'listening');
  const base=`http://127.0.0.1:${server.address().port}`;
  function actor(){

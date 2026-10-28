@@ -3,18 +3,18 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,readFileSync,readdirSync,rmSync,statSync,writeFileSync,copyFileSync,symlinkSync,mkdirSync,chmodSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {randomBytes,randomUUID} from 'node:crypto';
+import {randomBytes,randomUUID,createHash,createCipheriv} from 'node:crypto';
 import {createSecretVault,SecretVaultError} from '../server/secret-vault.js';
 function setup(t){const root=mkdtempSync(join(tmpdir(),'levr-vault-')),directory=join(root,'secrets'),masterKey=randomBytes(32).toString('hex');t.after(()=>rmSync(root,{recursive:true,force:true}));return {root,directory,masterKey,vault:createSecretVault({directory,masterKey,ownerKey:'owner-test-key'}),a:randomUUID(),b:randomUUID()};}
 
 test('workspace keys persist only as authenticated ciphertext with private permissions',t=>{
  const {directory,masterKey,vault,a}=setup(t),apiKey='client-test-key-123';
- assert.deepEqual(vault.status(a),{configured:false,storageReady:true,source:null});
- assert.deepEqual(vault.set(a,apiKey),{configured:true,storageReady:true,source:'workspace'});
+ assert.deepEqual(vault.status(a),{configured:false,storageReady:true,source:null,verified:false,verifiedAt:null});
+ assert.deepEqual(vault.set(a,apiKey),{configured:true,storageReady:true,source:'workspace',verified:false,verifiedAt:null});
  assert.equal(vault.get(a),apiKey);
  const file=join(directory,`${a}.json`),first=readFileSync(file,'utf8');
  assert.ok(!first.includes(apiKey));assert.ok(!first.includes(masterKey));assert.equal(statSync(directory).mode&0o777,0o700);assert.equal(statSync(file).mode&0o777,0o600);
- assert.deepEqual(Object.keys(vault.status(a)).sort(),['configured','source','storageReady']);
+ assert.deepEqual(Object.keys(vault.status(a)).sort(),['configured','source','storageReady','verified','verifiedAt']);
  assert.ok(!JSON.stringify(vault.status(a)).includes(apiKey));
  vault.set(a,apiKey);assert.notEqual(readFileSync(file,'utf8'),first,'same value receives a fresh random nonce');
  assert.equal(readdirSync(directory).length,1,'atomic writes leave no temporary files');
@@ -27,14 +27,14 @@ test('client accounts never fall back to Levr credentials and keys stay isolated
  vault.set(a,'client-a');vault.set(b,'client-b');assert.equal(vault.get(a),'client-a');assert.equal(vault.get(b),'client-b');
  vault.delete(a);assert.equal(vault.get(a),null);assert.equal(vault.get(b),'client-b');
  vault.set('levr','owner-replacement');assert.equal(vault.get('levr'),'owner-replacement');
- assert.deepEqual(vault.delete('levr'),{configured:true,storageReady:true,source:'environment'});
+ assert.deepEqual(vault.delete('levr'),{configured:true,storageReady:true,source:'environment',verified:false,verifiedAt:null});
  assert.equal(vault.get('levr'),'owner-test-key');
 });
 
 test('missing or short master key fails closed without generating replacement secrets',t=>{
  const {directory,a,vault}=setup(t);
  const noMaster=createSecretVault({directory,masterKey:'',ownerKey:'owner-test-key'});
- assert.deepEqual(noMaster.status(a),{configured:false,storageReady:false,source:null});
+ assert.deepEqual(noMaster.status(a),{configured:false,storageReady:false,source:null,verified:false,verifiedAt:null});
  assert.equal(noMaster.get('levr'),'owner-test-key');
  assert.throws(()=>noMaster.set(a,'never-persist-plaintext'),SecretVaultError);
  vault.set(a,'protected');assert.throws(()=>noMaster.get(a),/encryption setting/);
@@ -76,7 +76,28 @@ test('invalid replacement preserves the existing credential and delete leaves no
  const {vault,a,directory}=setup(t);vault.set(a,'original-client-key');
  assert.throws(()=>vault.set(a,'invalid replacement with spaces'),SecretVaultError);
  assert.equal(vault.get(a),'original-client-key');
- assert.deepEqual(vault.delete(a),{configured:false,storageReady:true,source:null});
+ assert.deepEqual(vault.delete(a),{configured:false,storageReady:true,source:null,verified:false,verifiedAt:null});
  assert.deepEqual(readdirSync(directory),[]);
- assert.deepEqual(vault.delete(a),{configured:false,storageReady:true,source:null});
+ assert.deepEqual(vault.delete(a),{configured:false,storageReady:true,source:null,verified:false,verifiedAt:null});
+});
+
+
+test('verification persists inside encrypted records; old records remain readable until checked',t=>{
+ const {vault,a,directory,masterKey}=setup(t),apiKey='legacy-test-key';
+ // Build the actual deployed version-one envelope, not a version-two approximation.
+ mkdirSync(directory,{mode:0o700});
+ const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',createHash('sha256').update(masterKey).digest(),iv);
+ cipher.setAAD(Buffer.from(a));const ciphertext=Buffer.concat([cipher.update(apiKey),cipher.final()]);
+ writeFileSync(join(directory,`${a}.json`),JSON.stringify({version:1,iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),ciphertext:ciphertext.toString('base64')}),{mode:0o600});
+ assert.equal(vault.get(a),apiKey);assert.equal(vault.status(a).verified,false);
+ const verified=vault.markVerified(a,apiKey);assert.equal(verified.verified,true);assert.ok(verified.verifiedAt);
+ const reopened=createSecretVault({directory,masterKey});assert.deepEqual(reopened.status(a),verified);assert.equal(reopened.get(a),apiKey);
+ const envelope=JSON.parse(readFileSync(join(directory,`${a}.json`),'utf8'));assert.equal(envelope.version,2);assert.equal(JSON.stringify(envelope).includes(verified.verifiedAt),false);
+ assert.throws(()=>vault.markVerified(a,'different-key'),SecretVaultError);assert.deepEqual(vault.status(a),verified);
+ vault.set(a,'replacement-test-key');assert.equal(vault.status(a).verified,false,'unverified replacement cannot retain old verification');
+});
+
+test('owner environment verification works without storage and never copies the owner key',t=>{
+ const {directory}=setup(t),vault=createSecretVault({directory,masterKey:'',ownerKey:'owner-environment-test-key'});
+ const status=vault.markVerified('levr','owner-environment-test-key');assert.equal(status.verified,true);assert.equal(status.storageReady,false);assert.equal(status.source,'environment');assert.throws(()=>readdirSync(directory),{code:'ENOENT'});
 });
