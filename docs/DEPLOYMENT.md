@@ -1,6 +1,6 @@
 # Private deployment
 
-Levr Competitor Analysis uses a single Node 24 server with SQLite databases and encrypted secret files on persistent storage. Render's paid web service with an attached disk is the initial host. Research endpoints require authenticated workspace access. The owner can manage every workspace; invited clients can access only their assigned workspaces. The sign-in page, invitation-acceptance page, and static interface assets are publicly reachable.
+Levr Competitor Analysis uses a single Node 24 server with SQLite databases and encrypted secret files on persistent storage. Render's paid web service with an attached disk is the initial host. Research endpoints require authenticated workspace access. The owner can manage every workspace; invited clients can access only their assigned workspaces. The sign-in, signup, invitation and OAuth entry/callback routes, plus static interface assets, are publicly reachable. New signups create separate client workspaces. See [signup and GHL setup](SIGNUP.md) before enabling the external handoffs.
 
 Creating a hosting account, connecting GitHub, and entering deployment secrets require the owner's account access. Cloud development-environment publication is separate from website deployment. Committing a blueprint creates no service or charge.
 
@@ -64,7 +64,7 @@ Processes and in-flight HTTP requests do not survive restarts. Interrupted refre
 
 ## Invitations and client access
 
-Only the owner creates client workspaces and invitations. Invitation tokens are cryptographically random, expire, and are single-use. Only their hashes are stored in the authentication database. Links use the URL fragment (`/invite#token=…`) so the token is not sent as part of the page URL to HTTP access logs. Treat the copied link as private and deliver it only to the intended person. The recipient must use the invited email address and set a password; an existing account must authenticate with its existing password.
+The owner creates invitations and manages client workspaces. Public signup creates a new isolated client workspace for the person registering; it cannot join an existing workspace. Invitation tokens are cryptographically random, expire, and are single-use. Only their hashes are stored in the authentication database. Links use the URL fragment (`/invite#token=…`) so the token is not sent as part of the page URL to HTTP access logs. Treat the copied link as private and deliver it only to the intended person. The recipient must use the invited email address and set a password; an existing account must authenticate with its existing password.
 
 Clients cannot enumerate or select other clients' workspaces. The server checks membership on each request; hiding navigation alone is not an access control. The owner can switch into every workspace for support and management, but saved provider keys remain unreadable through the dashboard.
 

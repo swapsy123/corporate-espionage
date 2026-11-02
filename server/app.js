@@ -11,6 +11,9 @@ import {createSecretVault} from './secret-vault.js';
 import {competitorRows,profileRow,itemRows,persistProfileItems,boardRows,opportunityRows,scopedItems} from './store.js';
 import {collectProfile,searchMetaCompanies} from './provider.js';
 import {verifyProviderAccount} from './provider-connection.js';
+import {createLeadDelivery} from './lead-delivery.js';
+import {createSocialSignup} from './social-signup.js';
+import {CONSENT_TEXT} from './signup-input.js';
 import {findPatterns,generateBrief,askLibrary} from './intelligence.js';
 const text=z.string().trim().min(1).max(500);
 const stages=z.enum(['Saved','Briefing','Creating','Launched','Winner']);
@@ -33,18 +36,25 @@ export function createApp(options={}){
  const catalog=options.db||openDatabase();if(options.seed!==false)seedCompetitors(catalog);
  const manager=createWorkspaceManager(catalog,{directory:options.workspaceDirectory}),db=manager.db;
  const vault=options.vault||createSecretVault({directory:options.secretDirectory||manager.secretDirectory||join(tmpdir(),`levr-test-secrets-${id()}`),masterKey:options.secretEncryptionKey,ownerKey:options.providerKey});
- const app=express(),a=auth(catalog,options),collector=options.collector||collectProfile,verifyProvider=options.verifyProvider||verifyProviderAccount;
+ const signupEnabled=options.signupEnabled??process.env.LEVR_PUBLIC_SIGNUP!=='0';
+ const leadDelivery=createLeadDelivery(catalog,options.leadDeliveryOptions);
+ const socialSignup=createSocialSignup(catalog,{production:options.production,signupEnabled,...options.socialSignupOptions});
+ const app=express(),a=auth(catalog,{...options,signupEnabled,leadDelivery,socialSignup}),collector=options.collector||collectProfile,verifyProvider=options.verifyProvider||verifyProviderAccount;
  app.disable('x-powered-by');if(process.env.TRUST_PROXY==='1')app.set('trust proxy',1);
  app.use(helmet({contentSecurityPolicy:{directives:{defaultSrc:["'self'"],scriptSrc:["'self'"],styleSrc:["'self'","'unsafe-inline'"],fontSrc:["'self'"],imgSrc:["'self'",'https:','data:'],mediaSrc:["'self'",'https:','blob:'],connectSrc:["'self'"],frameSrc:['https://www.youtube-nocookie.com','https://www.youtube.com'],upgradeInsecureRequests:process.env.NODE_ENV==='production'?[]:null}},crossOriginEmbedderPolicy:false}));
  app.use(express.json({limit:'100kb'}));
  app.use((req,res,next)=>{res.setHeader('Cache-Control','no-store');if(!['GET','HEAD','OPTIONS'].includes(req.method)&&req.headers.origin){let origin;try{origin=new URL(req.headers.origin).host;}catch{return res.status(403).json({error:'Invalid request origin.'});}if(origin!==req.get('host'))return res.status(403).json({error:'Cross-site requests are not allowed.'});}next();});
  app.get('/healthz',(req,res)=>res.json({ok:true}));
+ app.get('/auth/signup-config',(req,res)=>res.json({enabled:signupEnabled,providers:socialSignup.available(),social:socialSignup.context(req),consentText:CONSENT_TEXT}));
+ app.post('/auth/signup',a.signup);
+ socialSignup.registerRoutes(app,{signIn:a.socialLogin});
  app.post('/auth/accept-invite',a.acceptInvite);
  app.post('/auth/reset-password',a.resetPassword);
  app.post('/auth/login',a.login);app.post('/auth/logout',a.requireAuth,a.logout);
  app.use('/api',a.requireAuth);
  app.get('/api/session',(req,res)=>res.json(a.sessionPayload(req)));
  a.registerManagementRoutes(app);
+ leadDelivery.registerRoutes(app);
  app.use('/api',manager.middleware);
  app.get('/api/settings/provider',(req,res)=>res.json(vault.status(req.workspaceId)));
  app.put('/api/settings/provider',async(req,res)=>{const v=z.object({apiKey:z.string().trim().min(1).max(4096).regex(/^[\x21-\x7e]+$/,'Use an API key without spaces or line breaks.')}).parse(req.body);const account=await verifyProvider({apiKey:v.apiKey});res.json({...vault.set(req.workspaceId,v.apiKey,{verifiedAt:now()}),currentCredits:account.creditCount});});
@@ -113,5 +123,5 @@ export function createApp(options={}){
  app.use('/api',(req,res)=>res.status(404).json({error:'Endpoint not found.'}));
  const dist=resolve('dist');if(existsSync(dist)){app.use(express.static(dist,{index:false}));app.get('/{*path}',(req,res)=>res.sendFile(resolve(dist,'index.html')));}
  app.use((err,req,res,next)=>{if(res.headersSent)return next(err);if(err.name==='ProviderConnectionError')return res.status(err.status||502).json({error:err.safeMessage});if(err.name==='SecretVaultError')return res.status(503).json({error:err.safeMessage||'Workspace credential storage is unavailable. Contact Levr.'});if(err instanceof z.ZodError)return res.status(400).json({error:err.issues.map(x=>`${x.path.join('.')}: ${x.message}`).join('; ')});if(err.code?.startsWith('ERR_SQLITE'))return res.status(409).json({error:'This record conflicts with an existing record or a required reference is missing.'});if(err.type==='entity.parse.failed')return res.status(400).json({error:'Request must contain valid JSON.'});res.status(500).json({error:'The operation could not be completed. Previously saved data is preserved.'});});
- return {app,db:catalog,closeWorkspaceDatabases:()=>manager.close(),waitForRefresh:()=>Promise.all([...queues.values()])};
+ return {app,db:catalog,closeWorkspaceDatabases:()=>manager.close(),waitForRefresh:()=>Promise.all([...queues.values()]),waitForLeadDelivery:()=>leadDelivery.wait()};
 }

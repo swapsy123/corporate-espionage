@@ -1,5 +1,16 @@
 # Local validation record
 
+## Public free signup, social login and GHL lead capture — 2 November 2026
+
+- All 80 automated tests and the production client build pass. Migrations 006 and 007 were inspected and tested on the legacy single-owner database; existing research and confirmed profiles remain unchanged.
+- Email/password signup grants a new isolated workspace immediately. Tests cover personal email addresses, role/workspace spoofing, duplicate and reserved emails, input validation, rate limiting, request origin protection, and owner-only lead access.
+- Google and Facebook flows use mocked provider responses. Checks cover browser-bound single-use OAuth state, Google's PKCE and verified-email requirement, Facebook's missing-email case, denied disabled accounts, and refusal to silently link an existing password account by email. Tokens and secrets are excluded from lead records and responses.
+- GHL delivery is mocked. Failed requests preserve both access and captured lead data; owner retry retains the exact event ID, consent and UTM payload. Unsupported webhook destinations are rejected. “Webhook accepted” represents transport acceptance only.
+- All five UTM fields survive a tagged landing page, untagged navigation, and Google/Facebook redirects. Tests check replacement by a new campaign, expiry, malformed/blocked browser storage, exclusion of unrelated URL parameters, clearing after signup, owner readback and delivery to the webhook payload.
+- The isolated Chromium signup workflow passes for email, Google and Facebook, immediate Workspace settings, private data boundaries, manual lead retry and mobile overflow. Desktop and mobile screenshots were inspected; no browser JavaScript errors were observed.
+- Run `npm test`, `npm run build`, and `npm run test:signup:browser` (set `CHROMIUM_PATH` if needed). No real customer accounts or provider credentials are used by these checks.
+- Live Render deployment, the real GHL workflow's field mapping, and actual Google/Facebook app configuration remain unverified. Set secrets securely and complete the live acceptance checklist in `docs/SIGNUP.md`; local mocks do not establish a working live integration.
+
 ## Guided account setup — 28 October 2026
 
 - All 70 automated tests pass; the production client build passes. No SQL migration or new deployment variable is required for this update.

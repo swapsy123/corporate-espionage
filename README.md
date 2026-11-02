@@ -14,7 +14,7 @@ npm test
 npm start
 ```
 
-Before starting, set `LEVR_OWNER_PASSWORD` to a unique value of at least 16 characters in secure environment settings. Set `SCRAPECREATORS_API_KEY` there for live collection. The platform owner is `fraser@wearelevr.com` unless the server-side `OWNER_EMAIL` setting is deliberately changed. Clients sign in with their invited email and a password they set themselves. `.env.example` documents the settings; no real credential belongs in a tracked file. The application does not automatically load `.env` files. For local development, Node's `--env-file` flag can load a separately created, ignored file; prefer injected settings in managed environments.
+Before starting, set `LEVR_OWNER_PASSWORD` to a unique value of at least 16 characters in secure environment settings. Set `SCRAPECREATORS_API_KEY` there for live collection. The platform owner is `fraser@wearelevr.com` unless the server-side `OWNER_EMAIL` setting is deliberately changed. Clients can sign up for their own free workspace at `/signup`, or join through an invitation. Signup supports email/password and configured Google/Facebook login. See [signup and GHL setup](docs/SIGNUP.md) for the inbound webhook, field mapping and social credentials. `.env.example` documents the settings; no real credential belongs in a tracked file. The application does not automatically load `.env` files. For local development, Node's `--env-file` flag can load a separately created, ignored file; prefer injected settings in managed environments.
 
 For hot reload, run `npm run dev` for the server and `npm run dev:ui` for the Vite interface in separate terminals. Build before running the standalone production server. The database defaults to `data/levr.sqlite`, which is ignored by Git.
 

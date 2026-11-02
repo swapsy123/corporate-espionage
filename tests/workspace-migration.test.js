@@ -28,7 +28,9 @@ test('deployed single-owner database upgrades without changing existing research
   for(const table of tables)assert.deepEqual(newDb.prepare(`SELECT * FROM ${table}`).all(),snapshots[table],`${table} must survive upgrade unchanged`);
   assert.equal(newDb.prepare('SELECT id FROM workspaces').get().id,'levr');
   assert.equal(newDb.prepare('SELECT count(*) n FROM users').get().n,0);
-  assert.equal(newDb.prepare('SELECT count(*) n FROM migrations').get().n,5);
+  assert.equal(newDb.prepare('SELECT count(*) n FROM migrations').get().n,7);
+  assert.equal(newDb.prepare('SELECT count(*) n FROM signup_leads').get().n,0);
+  assert.equal(newDb.prepare('SELECT count(*) n FROM social_identities').get().n,0);
   assert.ok(newDb.prepare('PRAGMA table_info(invites)').all().some(c=>c.name==='purpose'));
   assert.equal(newDb.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
  }finally{oldDb?.close();newDb?.close();rmSync(directory,{recursive:true,force:true});}

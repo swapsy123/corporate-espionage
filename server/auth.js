@@ -1,4 +1,5 @@
 import {randomBytes,randomUUID,createHash,scryptSync,timingSafeEqual} from 'node:crypto';
+import {signupInput,leadPayload} from './signup-input.js';
 export const digest = v=>createHash('sha256').update(v).digest('hex');
 const SESSION_AGE=12*60*60*1000;
 const INVITE_AGE=7*24*60*60*1000;
@@ -20,6 +21,7 @@ export function auth(db,options={}){
  const password=options.password??process.env.LEVR_OWNER_PASSWORD;
  const ownerEmail=normalizeEmail(options.ownerEmail??process.env.OWNER_EMAIL??'fraser@wearelevr.com');
  const production=options.production??process.env.NODE_ENV==='production';
+ const signupEnabled=options.signupEnabled??process.env.LEVR_PUBLIC_SIGNUP!=='0';
  const ownerHash=validPassword(password)?passwordHash(password):null;
  const dummyHash=passwordHash(randomBytes(32).toString('hex'));
  const cookieName=production?'__Host-levr_session':'levr_session';
@@ -46,6 +48,41 @@ export function auth(db,options={}){
   return {key,time};
  }
  function recordFailure(rate){db.prepare('INSERT INTO login_attempts(key,count,expires_at) VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET count=count+1').run(rate.key,rate.time+900000);}
+ function signup(req,res){
+  if(!signupEnabled)return res.status(403).json({error:'Public signup is currently closed. Sign in or use an invitation.'});
+  const time=Date.now(),key=digest(`signup:${req.ip||'unknown'}`);
+  db.prepare('DELETE FROM signup_attempts WHERE expires_at<?').run(time);
+  if((db.prepare('SELECT count FROM signup_attempts WHERE key=?').get(key)?.count||0)>=10)
+   return res.status(429).json({error:'Too many signup attempts. Try again in one hour.'});
+  db.prepare('INSERT INTO signup_attempts VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET count=count+1').run(key,time+3600000);
+  const fields=signupInput.parse(req.body),social=options.socialSignup?.pending(req);
+  if(fields.contactAddress)return res.status(400).json({error:'Unable to complete signup. Reload and try again.'});
+  if(social?.email&&fields.email!==social.email)return res.status(400).json({error:'Use the email returned by your sign-in provider, or choose email signup.'});
+  if(!social&&!validPassword(fields.password))return res.status(400).json({error:'Choose a password of at least 16 characters.'});
+  const email=fields.email;
+  if(email===ownerEmail||db.prepare('SELECT 1 FROM users WHERE email=?').get(email))
+   return res.status(409).json({error:'This email already has an account. Sign in with its existing login method or ask Levr for a password reset.'});
+  const userId=randomUUID(),workspaceId=randomUUID(),leadId=randomUUID(),createdAt=currentTime();
+  const encoded=passwordHash(social?randomBytes(48).toString('base64url'):fields.password);
+  const payload=leadPayload({id:leadId,workspaceId,createdAt,fields,emailVerified:!!social?.email_verified,provider:social?.provider||'password'});
+  db.exec('BEGIN IMMEDIATE');
+  try{
+   if(social)options.socialSignup.consume(req,social);
+   db.prepare('INSERT INTO users(id,email,password_hash,created_at) VALUES (?,?,?,?)').run(userId,email,encoded,createdAt);
+   db.prepare('INSERT INTO workspaces(id,name,created_at) VALUES (?,?,?)').run(workspaceId,fields.companyName,createdAt);
+   db.prepare('INSERT INTO memberships VALUES (?,?,?)').run(workspaceId,userId,createdAt);
+   if(social)db.prepare('INSERT INTO social_identities VALUES (?,?,?,?)').run(social.provider,social.subject,userId,createdAt);
+   db.prepare('INSERT INTO signup_leads(id,user_id,workspace_id,email,payload,created_at) VALUES (?,?,?,?,?,?)')
+    .run(leadId,userId,workspaceId,email,JSON.stringify(payload),createdAt);
+   db.exec('COMMIT');
+  }catch(error){db.exec('ROLLBACK');throw error;}
+  if(social)options.socialSignup.clear(res);
+  const session=issueSession(req,res,{id:userId,email,role:'client'});
+  res.status(201).json({...session,defaultWorkspaceId:workspaceId});
+  // CRM delivery happens after access is granted; its durable row survives failure.
+  options.leadDelivery?.schedule(leadId);
+ }
+ function socialLogin(req,res,user){issueSession(req,res,user);res.redirect('/settings');}
  function login(req,res){
   const rate=rateLimit(req,res);if(!rate)return;
   const email=normalizeEmail(req.body?.email),input=req.body?.password;
@@ -196,5 +233,5 @@ export function auth(db,options={}){
    db.prepare('UPDATE invites SET revoked_at=coalesce(revoked_at,?) WHERE id=?').run(currentTime(),invite.id);res.json({ok:true});
   });
  }
- return {login,requireAuth,logout,ownerEmail,sessionPayload,registerManagementRoutes,acceptInvite,resetPassword};
+ return {login,signup,signupEnabled,socialLogin,requireAuth,logout,ownerEmail,sessionPayload,registerManagementRoutes,acceptInvite,resetPassword};
 }
