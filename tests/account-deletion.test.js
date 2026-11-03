@@ -33,7 +33,7 @@ async function fixture(t,overrides={}){
   for(const item of response.headers.getSetCookie()){const pair=item.split(';')[0],index=pair.indexOf('='),key=pair.slice(0,index),value=pair.slice(index+1);if(value)cookies.set(key,value);else cookies.delete(key)}
   const data=response.headers.get('content-type')?.includes('json')?await response.json():await response.text();if(data?.csrf)csrf=data.csrf;
   return {status:response.status,data,headers:response.headers};
- },async oauth(provider,reauth=false){const start=await this.request(reauth?`/api/account/deletion/reauth/${provider}`:`/auth/oauth/${provider}/start`,{method:'POST',body:{}});assert.equal(start.status,200,JSON.stringify(start.data));const url=new URL(start.data.url);return {url,callback:`/auth/oauth/${provider}/callback?state=${url.searchParams.get('state')}&code=synthetic-code`}}};}
+ }};}
  const owner=actor();assert.equal((await owner.request('/auth/login',{method:'POST',body:{email:'owner@example.test',password:ownerPassword}})).status,200);
  async function signup(email='client@example.test',person=actor(),password=randomBytes(24).toString('hex')){
   const result=await person.request('/auth/signup',{method:'POST',body:{fullName:'Deletion Test',companyName:'Private client',email,password}});assert.equal(result.status,201,JSON.stringify(result.data));await app.waitForLeadDelivery();
@@ -59,7 +59,9 @@ test('owner deletion removes the full account cascade, exclusive research files 
  s.db.prepare('INSERT INTO pending_social_signups VALUES (?,?,?,?,?,?,?)').run(hash('email-ticket'),'google','another-subject',client.email,1,'Must disappear',Date.now()+900000);
  await s.owner.request(`/api/workspaces/${other.workspaceId}/invites`,{method:'POST',body:{email:client.email}});
  await s.owner.request(`/api/workspaces/${client.workspaceId}/invites`,{method:'POST',body:{email:'pending-invite@example.test'}});
- const reauth=await client.actor.oauth('facebook',true);assert.ok(reauth);
+ const oldState=hash('legacy-state'),oldSession=hash(client.actor.cookies.get('levr_session'));
+ s.db.prepare('INSERT INTO signup_oauth_states VALUES (?,?,?,?)').run(oldState,hash('legacy-browser'),'facebook',Date.now()+600000);
+ s.db.prepare('INSERT INTO account_deletion_challenges VALUES (?,?,?)').run(oldState,client.userId,oldSession);
  const wrong=await s.owner.request(`/api/accounts/${client.userId}`,{method:'DELETE',body:{confirmationEmail:'wrong@example.test'}});assert.equal(wrong.status,400);
  const result=await s.owner.request(`/api/accounts/${client.userId}`,{method:'DELETE',headers:{'X-Workspace-Id':'invalid-workspace'},body:{confirmationEmail:client.email}});
  assert.equal(result.status,200,JSON.stringify(result.data));assert.equal(result.data.cleanupPending,false);
@@ -129,14 +131,16 @@ test('client self-service requires the current password and revokes every sessio
  assert.equal(result.status,200);assert.equal(client.actor.cookies.has('levr_session'),false);assert.equal((await second.request('/api/session')).status,401);
  assert.equal(s.db.prepare('SELECT reason FROM account_deletions').get().reason,'self_service');
 });
-test('provider deletion reauthentication requires the linked identity and grants only the initiating session for five minutes',async t=>{
- const s=await fixture(t),person=s.actor();let flow=await person.oauth('google');await person.request(flow.callback);const client=await s.signup(s.state.google.email,person,undefined);
- let reauth=await person.oauth('google',true);assert.equal(reauth.url.searchParams.get('max_age'),'0');s.state.google.sub='wrong-identity';assert.equal((await person.request(reauth.callback)).headers.get('location'),'/settings?account_delete_auth=failed');assert.equal(s.db.prepare('SELECT count(*) n FROM account_deletion_reauth').get().n,0);
- s.state.google.sub='google-1';reauth=await person.oauth('google',true);assert.equal((await person.request(reauth.callback)).headers.get('location'),'/settings?account_delete_auth=verified');assert.equal((await person.request('/api/account/deletion')).data.reauthenticated,true);
- const another=s.actor();flow=await another.oauth('google');await another.request(flow.callback);assert.equal((await another.request('/api/account',{method:'DELETE',body:{confirmationEmail:client.email}})).status,403);
- s.db.prepare('UPDATE account_deletion_reauth SET expires_at=?').run(Date.now()-1);assert.equal((await person.request('/api/account',{method:'DELETE',body:{confirmationEmail:client.email}})).status,403);
- reauth=await person.oauth('google',true);await person.request(reauth.callback);assert.equal((await person.request('/api/account',{method:'DELETE',body:{confirmationEmail:client.email}})).status,200);
- assert.equal(s.db.prepare('SELECT count(*) n FROM account_deletion_reauth').get().n,0);
+test('legacy provider confirmation cannot replace a password when deleting an account',async t=>{
+ const s=await fixture(t),client=await s.signup();
+ s.db.prepare('INSERT INTO social_identities VALUES (?,?,?,?)').run('google','legacy-subject',client.userId,new Date().toISOString());
+ const tokenHash=hash(client.actor.cookies.get('levr_session'));
+ s.db.prepare('INSERT INTO account_deletion_reauth VALUES (?,?,?)').run(tokenHash,client.userId,Date.now()+300000);
+ const preview=(await client.actor.request('/api/account/deletion')).data;assert.equal(preview.hasLegacySocialIdentity,true);assert.equal(preview.reauthenticated,false);assert.deepEqual(preview.socialProviders,[]);
+ assert.equal((await client.actor.request('/api/account/deletion/reauth/google',{method:'POST',body:{}})).status,410);
+ assert.equal((await client.actor.request('/api/account',{method:'DELETE',body:{confirmationEmail:client.email}})).status,403);
+ assert.equal((await client.actor.request('/api/account',{method:'DELETE',body:{confirmationEmail:client.email,password:client.password}})).status,200);
+ assert.equal(s.db.prepare('SELECT count(*) n FROM social_identities').get().n,0);assert.equal(s.db.prepare('SELECT count(*) n FROM account_deletion_reauth').get().n,0);
 });
 test('Meta signed requests reject tampering and return opaque public confirmation for matching and unknown identities',async t=>{
  const s=await fixture(t),client=await s.signup();await s.research(client);s.db.prepare('INSERT INTO social_identities VALUES (?,?,?,?)').run('facebook','123456789',client.userId,new Date().toISOString());
@@ -159,19 +163,9 @@ test('Meta status remains pending after a failed cleanup, including repeated cal
  const later=await s.signup(client.email);s.db.prepare('INSERT INTO social_identities VALUES (?,?,?,?)').run('facebook','123456789',later.userId,new Date().toISOString());await s.meta(request);assert.ok(s.db.prepare('SELECT 1 FROM users WHERE id=?').get(later.userId));
 });
 test('Meta also removes incomplete Facebook signup data without revealing account existence',async t=>{
- const s=await fixture(t),person=s.actor();const flow=await person.oauth('facebook');await person.request(flow.callback);
+ const s=await fixture(t),person=s.actor();s.db.prepare('INSERT INTO pending_social_signups VALUES (?,?,?,?,?,?,?)').run(hash('incomplete-facebook'),'facebook',s.state.facebook.id,s.state.facebook.email,0,'Incomplete signup',Date.now()+900000);
  assert.equal(s.db.prepare('SELECT count(*) n FROM pending_social_signups').get().n,1);assert.equal((await s.meta(signed(s.state.facebook.id))).status,200);
  assert.equal(s.db.prepare('SELECT count(*) n FROM pending_social_signups').get().n,0);assert.equal((await person.request('/auth/signup-config')).data.social,null);
-});
-test('an OAuth response already in flight cannot restore pending personal data after deletion',async t=>{
- const s=await fixture(t),person=s.actor();let flow=await person.oauth('google');await person.request(flow.callback);const client=await s.signup(s.state.google.email,person);
- let release,entered;const started=new Promise(resolve=>entered=resolve);s.state.profileGate=new Promise(resolve=>release=resolve);
- // Wait until the state has been consumed and the provider fetch is in progress.
- const waiting=s.actor();
- const login=await waiting.oauth('google');const response=waiting.request(login.callback);
- const check=setInterval(()=>{if(!s.db.prepare('SELECT 1 FROM signup_oauth_states WHERE state_hash=?').get(hash(new URL('https://x'+login.callback).searchParams.get('state')))){clearInterval(check);entered()}},5);
- await started;s.app.deleteAccount(client.userId,{reason:'owner_request'});release();
- assert.equal((await response).headers.get('location'),'/signup?auth_error=oauth_failed');assert.equal(s.db.prepare('SELECT count(*) n FROM pending_social_signups').get().n,0);
 });
 test('queued webhook deliveries are discarded and in-flight requests are aborted when the account is deleted',async t=>{
  const calls=[];const s=await fixture(t,{leadDeliveryOptions:{webhookUrl:'https://services.leadconnectorhq.com/hooks/test/webhook-trigger/test',fetchImpl:async(url,init)=>{calls.push(JSON.parse(init.body));return new Promise((resolve,reject)=>{init.signal.addEventListener('abort',()=>reject(Error('cancelled')),{once:true})})}}});

@@ -1,5 +1,14 @@
 # Local validation record
 
+## Email/password only — 3 November 2026
+
+- All 97 automated tests and the production client build pass. Google/Facebook authentication and deletion reauthentication have been retired; old provider credentials cannot re-enable them. No new migration or deployment variable is required.
+- Obsolete provider signup tickets, OAuth states/challenges and deletion grants are invalidated at startup. Tests verify that existing accounts, memberships, identities and captured leads survive. A stale ticket cannot bypass password validation or mark an email as verified. Existing provider-linked accounts can use an owner-issued password reset without losing their workspace.
+- Account deletion requires the current password even if a legacy provider grant exists. Historical Meta signed-request deletion remains tested; it is not a requirement to configure a new Meta app.
+- Chromium signup and deletion workflows pass on desktop and mobile. Checks cover absent provider buttons despite configured test credentials, immediate private onboarding, password login/logout, lead retry, retained UTMs, retired callback guidance, typed deletion confirmation, cancellation, cleanup retry and session revocation. Signup screenshots were inspected; no JavaScript errors or horizontal overflow were observed.
+- Commands: `npm test`, `npm run build`, `npm run test:signup:browser`, `npm run test:deletion:browser`. Provider responses and accounts are synthetic. The real GHL workflow still needs live field-mapping verification.
+- This update still requires Render's manual deployment. It does not delete production test accounts, GHL contacts or hosting backups. ARPRA is unchanged. Earlier social-login checks below are historical and are superseded by this section.
+
 ## Account and lead deletion — 3 November 2026
 
 - All 98 automated tests pass and the production client build passes. Additive migration 008 was inspected and tested against both the legacy owner database and an existing client/signup schema. Existing users, memberships, lead payloads, linked identities and research survive migration; SQLite integrity, foreign keys and migration repeatability pass.

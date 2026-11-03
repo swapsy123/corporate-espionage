@@ -75,16 +75,13 @@ export function registerAccountDeletion(app,{db,deletion,social,auth}){
  });
  app.post('/api/account-deletions/:id/retry',owner,(req,res)=>res.json(deletion.retryCleanup(req.params.id)));
  app.get('/api/account/deletion',client,(req,res)=>{
-  const methods=social.available();
-  const socialProviders=db.prepare('SELECT provider FROM social_identities WHERE user_id=?').all(req.user.id).map(({provider})=>({provider,available:methods[provider]}));
-  const reauthenticated=!!db.prepare('SELECT 1 FROM account_deletion_reauth WHERE session_hash=? AND user_id=? AND expires_at>?').get(req.session.token_hash,req.user.id,Date.now());
-  res.json({...deletion.preview(req.user.id),socialProviders,reauthenticated});
+  const hasLegacySocialIdentity=!!db.prepare('SELECT 1 FROM social_identities WHERE user_id=?').get(req.user.id);
+  res.json({...deletion.preview(req.user.id),socialProviders:[],reauthenticated:false,hasLegacySocialIdentity});
  });
  app.post('/api/account/deletion/reauth/:provider',client,social.startDeletionReauth);
  app.delete('/api/account',client,(req,res)=>{
   if(normalizedEmail(req.body?.confirmationEmail)!==req.user.email)return res.status(400).json({error:'Type your account email exactly to confirm deletion.'});
-  const confirmed=db.prepare('SELECT 1 FROM account_deletion_reauth WHERE session_hash=? AND user_id=? AND expires_at>?').get(req.session.token_hash,req.user.id,Date.now());
-  if(!confirmed&&!auth.confirmDeletionPassword(req,res,req.body?.password))return;
+  if(!auth.confirmDeletionPassword(req,res,req.body?.password))return;
   const result=deletion.deleteAccount(req.user.id,{reason:'self_service',actorId:req.user.id});
   auth.clearSession(res);social.clear(res);res.json(result);
  });

@@ -7,18 +7,18 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createApp} from '../server/app.js';
 import {openDatabase} from '../server/db.js';
+import {createSocialSignup} from '../server/social-signup.js';
 
-const json=value=>new Response(JSON.stringify(value),{headers:{'content-type':'application/json'}});
 const fields=(email='person@gmail.com')=>({fullName:'Test Person',email,companyName:'Example company',website:'example.test',phone:'',password:randomBytes(24).toString('hex'),marketingConsent:false});
 async function fixture(t,options={}){
  const dir=mkdtempSync(join(tmpdir(),'levr-signup-')),db=openDatabase(join(dir,'catalog.sqlite'));
  const ownerPassword=randomBytes(24).toString('hex'),deliveryCalls=[],socialCalls=[];
- let deliveryStatus=200,googleProfile={sub:'google-person',name:'Google Person',email:'google.person@gmail.com',email_verified:true},facebookProfile={id:'1234567',name:'Facebook Person'};
+ let deliveryStatus=200;
  const app=createApp({db,seed:false,password:ownerPassword,ownerEmail:'owner@example.test',production:false,
   secretEncryptionKey:randomBytes(32).toString('hex'),secretDirectory:join(dir,'secrets'),
   leadDeliveryOptions:{webhookUrl:'https://services.leadconnectorhq.com/hooks/test-location/webhook-trigger/test-hook',fetchImpl:async(url,init)=>{deliveryCalls.push({url,init,payload:JSON.parse(init.body)});return new Response('sensitive provider response',{status:deliveryStatus})}},
   socialSignupOptions:{publicBaseUrl:'https://free.example.test',googleClientId:'fixture-google-id',googleClientSecret:'fixture-google-secret',facebookAppId:'fixture-facebook-id',facebookAppSecret:'fixture-facebook-secret',fetchImpl:async(url,init)=>{
-   socialCalls.push({url,init});if(url.includes('token'))return json({access_token:'fixture-access-token'});return json(url.includes('googleapis')?googleProfile:facebookProfile);
+   socialCalls.push({url,init});throw Error('Provider authentication must not be contacted.');
   }},...options});
  const server=app.app.listen(0,'127.0.0.1');await once(server,'listening');const base=`http://127.0.0.1:${server.address().port}`;
  t.after(async()=>{await app.waitForLeadDelivery();await app.waitForRefresh();await new Promise(r=>server.close(r));app.closeWorkspaceDatabases();db.close();rmSync(dir,{recursive:true,force:true})});
@@ -27,9 +27,9 @@ async function fixture(t,options={}){
   for(const cookie of r.headers.getSetCookie()){const part=cookie.split(';')[0],i=part.indexOf('='),key=part.slice(0,i),value=part.slice(i+1);if(value)cookies.set(key,value);else cookies.delete(key)}
   const data=r.headers.get('content-type')?.includes('json')?await r.json():await r.text();if(data?.csrf)csrf=data.csrf;
   return{status:r.status,data,headers:r.headers};
- },async signup(value=fields()){return this.request('/auth/signup',{method:'POST',body:value})},async oauth(provider){const start=await this.request(`/auth/oauth/${provider}/start`,{method:'POST',body:{}});assert.equal(start.status,200);const url=new URL(start.data.url);return {url,callback:`/auth/oauth/${provider}/callback?state=${url.searchParams.get('state')}&code=fixture-code`}}};}
+ },async signup(value=fields()){return this.request('/auth/signup',{method:'POST',body:value})}};}
  const owner=actor();await owner.request('/auth/login',{method:'POST',body:{email:'owner@example.test',password:ownerPassword}});
- return{db,app,base,actor,owner,deliveryCalls,socialCalls,setDeliveryStatus:v=>deliveryStatus=v,setGoogle:v=>googleProfile=v,setFacebook:v=>facebookProfile=v};
+ return{db,app,base,actor,owner,deliveryCalls,socialCalls,setDeliveryStatus:v=>deliveryStatus=v};
 }
 test('Public signup grants only its own workspace and sends allowed lead fields without a password',async t=>{
  const s=await fixture(t),client=s.actor(),input=fields();input.attribution={utm_source:'instagram',utm_medium:'paid_social',utm_campaign:'free-library',utm_content:'carousel-1',utm_term:'growth operators',access_token:'must-not-be-forwarded'};
@@ -63,36 +63,49 @@ test('Duplicate signup, reserved owner email, invalid fields and cross-site regi
  assert.equal((await s.actor().request('/auth/signup',{method:'POST',body:fields('other@gmail.com'),headers:{Origin:'https://other.example'}})).status,403);
  assert.equal(s.db.prepare('SELECT count(*) n FROM users').get().n,1);
 });
-test('Google signup is browser-bound, PKCE protected, single-use and finishes without a password',async t=>{
- const s=await fixture(t),client=s.actor(),other=s.actor(),flow=await client.oauth('google');
- assert.equal(flow.url.searchParams.get('code_challenge_method'),'S256');
- assert.equal((await other.request(flow.callback)).headers.get('location'),'/signup?auth_error=oauth_failed');assert.equal(s.socialCalls.length,0);
- assert.equal((await client.request(flow.callback)).headers.get('location'),'/signup');
- const exchange=new URLSearchParams(s.socialCalls[0].init.body);assert.equal(createHash('sha256').update(exchange.get('code_verifier')).digest('base64url'),flow.url.searchParams.get('code_challenge'));
- const context=(await client.request('/auth/signup-config')).data;assert.equal(context.social.email,'google.person@gmail.com');assert.equal(context.social.emailVerified,true);
- const body={...fields('google.person@gmail.com'),password:undefined};
- assert.equal((await client.signup({...body,email:'different@gmail.com'})).status,400);
- const result=await client.signup(body);assert.equal(result.status,201);assert.equal(s.db.prepare('SELECT provider FROM social_identities').get().provider,'google');await s.app.waitForLeadDelivery();assert.equal(s.deliveryCalls[0].payload.email_verified,true);
- assert.equal((await client.request(flow.callback)).headers.get('location'),'/signup?auth_error=oauth_failed');
- const again=s.actor(),login=await again.oauth('google');assert.equal((await again.request(login.callback)).headers.get('location'),'/settings');assert.equal((await again.request('/api/session')).data.user.id,result.data.user.id);
- const stored=JSON.stringify(s.db.prepare('SELECT * FROM pending_social_signups').all())+JSON.stringify(s.db.prepare('SELECT * FROM signup_oauth_states').all())+JSON.stringify(s.db.prepare('SELECT * FROM signup_leads').all());
- for(const secret of ['fixture-google-secret','fixture-access-token',exchange.get('code_verifier')])assert.equal(stored.includes(secret),false);
+test('provider settings cannot re-enable removed signup or login routes',async t=>{
+ const s=await fixture(t),client=s.actor();
+ const config=(await client.request('/auth/signup-config')).data;assert.deepEqual(config.providers,{google:false,facebook:false});assert.equal(config.social,null);
+ for(const provider of ['google','facebook']){
+  assert.equal((await client.request(`/auth/oauth/${provider}/start`,{method:'POST',body:{}})).status,410);
+  assert.equal((await client.request(`/auth/oauth/${provider}/callback?state=old-state&code=old-code`)).headers.get('location'),'/signup?auth_error=social_removed');
+ }
+ assert.equal(s.socialCalls.length,0);assert.equal((await client.request('/api/session')).status,401);
+ assert.equal(s.db.prepare('SELECT count(*) n FROM users').get().n,0);assert.equal(s.db.prepare('SELECT count(*) n FROM signup_oauth_states').get().n,0);
 });
-test('Facebook signup without a returned email collects an address and never claims it is verified',async t=>{
- const s=await fixture(t),client=s.actor(),flow=await client.oauth('facebook');assert.equal(flow.url.searchParams.get('scope'),'public_profile,email');
- assert.equal((await client.request(flow.callback)).headers.get('location'),'/signup');assert.equal((await client.request('/auth/signup-config')).data.social.email,null);
- assert.equal((await client.signup({...fields('personal@gmail.com'),password:undefined})).status,201);await s.app.waitForLeadDelivery();assert.equal(s.deliveryCalls[0].payload.signup_method,'facebook');assert.equal(s.deliveryCalls[0].payload.email_verified,false);
+test('retirement clears temporary provider grants while preserving existing accounts and linked identities',async t=>{
+ const s=await fixture(t),created=await s.actor().signup(),userId=created.data.user.id;
+ s.db.prepare('INSERT INTO social_identities VALUES (?,?,?,?)').run('google','existing-subject',userId,new Date().toISOString());
+ s.db.prepare('INSERT INTO pending_social_signups VALUES (?,?,?,?,?,?,?)').run('old-ticket','google','pending-subject','pending@example.test',1,'Pending name',Date.now()+900000);
+ s.db.prepare('INSERT INTO signup_oauth_states VALUES (?,?,?,?)').run('old-state','old-browser','google',Date.now()+600000);
+ const session=s.db.prepare('SELECT token_hash FROM sessions WHERE user_id=?').get(userId);
+ s.db.prepare('INSERT INTO account_deletion_reauth VALUES (?,?,?)').run(session.token_hash,userId,Date.now()+300000);
+ createSocialSignup(s.db);
+ for(const table of ['pending_social_signups','signup_oauth_states','account_deletion_reauth'])assert.equal(s.db.prepare(`SELECT count(*) n FROM ${table}`).get().n,0);
+ for(const table of ['users','social_identities','signup_leads'])assert.equal(s.db.prepare(`SELECT count(*) n FROM ${table}`).get().n,1);
+ assert.ok(s.db.prepare('SELECT 1 FROM memberships WHERE user_id=?').get(userId));
 });
-test('Social email matches never silently link to an existing password account',async t=>{
- const s=await fixture(t);await s.actor().signup(fields('google.person@gmail.com'));
- const client=s.actor(),flow=await client.oauth('google');await client.request(flow.callback);
- assert.equal((await client.signup({...fields('google.person@gmail.com'),password:undefined})).status,409);
- assert.equal((await client.request('/api/session')).status,401);assert.equal(s.db.prepare('SELECT count(*) n FROM social_identities').get().n,0);
+test('a pending social ticket cannot bypass the password requirement or claim a verified email',async t=>{
+ const s=await fixture(t),client=s.actor(),ticket=randomBytes(32).toString('base64url');
+ client.cookies.set('levr_social_signup',ticket);
+ s.db.prepare('INSERT INTO pending_social_signups VALUES (?,?,?,?,?,?,?)').run(createHash('sha256').update(ticket).digest('hex'),'google','historical-subject','pending@gmail.com',1,'Pending test',Date.now()+900000);
+ assert.equal((await client.request('/auth/signup-config')).data.social,null);
+ assert.equal((await client.signup({...fields('pending@gmail.com'),password:undefined})).status,400);
+ const input=fields('pending@gmail.com');const result=await client.signup({...input,provider:'google',emailVerified:true});assert.equal(result.status,201);
+ await s.app.waitForLeadDelivery();assert.equal(s.deliveryCalls[0].payload.signup_method,'password');assert.equal(s.deliveryCalls[0].payload.email_verified,false);
+ assert.equal(s.db.prepare('SELECT count(*) n FROM social_identities').get().n,0);assert.equal(s.db.prepare('SELECT count(*) n FROM pending_social_signups').get().n,0);
+ assert.equal(client.cookies.has('levr_social_signup'),false);
 });
-test('Unverified Google identity is rejected and disabled social users cannot regain access',async t=>{
- const s=await fixture(t),a=s.actor();s.setGoogle({sub:'person',email:'test@gmail.com',email_verified:false});let flow=await a.oauth('google');assert.equal((await a.request(flow.callback)).headers.get('location'),'/signup?auth_error=oauth_failed');
- s.setGoogle({sub:'person',email:'test@gmail.com',email_verified:true});flow=await a.oauth('google');await a.request(flow.callback);await a.signup({...fields('test@gmail.com'),password:undefined});s.db.prepare('UPDATE users SET disabled=1').run();
- const b=s.actor();flow=await b.oauth('google');assert.equal((await b.request(flow.callback)).headers.get('location'),'/signup?auth_error=access_unavailable');
+test('existing linked accounts retain data and can recover email/password access through an owner reset',async t=>{
+ const s=await fixture(t),client=s.actor(),input=fields('legacy@gmail.com'),created=await client.signup(input),userId=created.data.user.id,workspaceId=created.data.defaultWorkspaceId;
+ s.db.prepare('INSERT INTO social_identities VALUES (?,?,?,?)').run('google','legacy-google-subject',userId,new Date().toISOString());
+ s.db.prepare('UPDATE users SET password_hash=? WHERE id=?').run('unusable-legacy-fixture-hash',userId);
+ const reset=await s.owner.request(`/api/workspaces/${workspaceId}/members/${userId}/reset`,{method:'POST',body:{}});assert.equal(reset.status,201);
+ const password=randomBytes(24).toString('hex'),recovered=s.actor();
+ assert.equal((await recovered.request('/auth/reset-password',{method:'POST',body:{token:reset.data.token,email:input.email,password}})).status,200);
+ assert.equal(s.db.prepare('SELECT count(*) n FROM social_identities').get().n,1);
+ const login=s.actor();assert.equal((await login.request('/auth/login',{method:'POST',body:{email:input.email,password}})).status,200);
+ assert.equal((await login.request('/api/session')).data.defaultWorkspaceId,workspaceId);
 });
 test('Unsafe webhook destinations are never contacted; disabled signup and rate limits are enforced',async t=>{
  let calls=0;const s=await fixture(t,{leadDeliveryOptions:{webhookUrl:'https://127.0.0.1/private',fetchImpl:async()=>{calls++;throw Error()}}});

@@ -7,7 +7,7 @@ function allowed(values){
  for(const key of UTM_FIELDS)if(typeof values?.[key]==='string')result[key]=values[key].trim().slice(0,200);
  return result;
 }
-// Retain the latest tagged visit in this tab across navigation and OAuth.
+// Retain the latest tagged visit in this tab across navigation and reloads.
 // An untagged page does not overwrite it; a new campaign replaces it as a set.
 export function captureSignupAttribution(search=globalThis.location?.search||'',storage=browserStorage(),now=Date.now()){
  const params=new URLSearchParams(search);

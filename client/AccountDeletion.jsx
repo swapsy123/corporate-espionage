@@ -2,7 +2,7 @@ import React,{useEffect,useRef,useState} from 'react';
 
 function Scope({account}){
  return <>
-  <p>This permanently removes the account, all its sign-in sessions, social sign-in links, signup details and invitations.</p>
+  <p>This permanently removes the account, all its sign-in sessions, signup details, linked identities and invitations.</p>
   {account.workspaces?.length>0&&<ul>{account.workspaces.map(w=><li key={w.id}><strong>{w.name}</strong> — {w.willDelete?'delete its research, boards, briefs, refresh history and saved ScrapeCreators key':'keep this workspace because another account still has membership or signup data linked to it'}</li>)}</ul>}
   <p className="caption">Shared research stays with the remaining accounts. Data already sent to GoHighLevel and hosting backups needs separate handling by Levr. Deletion does not cancel a ScrapeCreators subscription.</p>
  </>;
@@ -10,7 +10,6 @@ function Scope({account}){
 export function ClientAccountDeletion({api}){
  const [account,setAccount]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[confirm,setConfirm]=useState(''),[password,setPassword]=useState('');
  useEffect(()=>{let alive=true;api('/api/account/deletion').then(value=>alive&&setAccount(value)).catch(e=>alive&&setError(e.message));return()=>{alive=false}},[]);
- async function reauthenticate(provider){setBusy(true);setError('');try{const result=await api(`/api/account/deletion/reauth/${provider}`,{method:'POST',body:{}});location.assign(result.url)}catch(e){setError(e.message);setBusy(false)}}
  async function submit(event){event.preventDefault();setBusy(true);setError('');try{
   const result=await api('/api/account',{method:'DELETE',body:{confirmationEmail:confirm,password}});
   setPassword('');location.replace(`/account-deleted?cleanup=${result.cleanupPending?'pending':'complete'}`);
@@ -20,14 +19,11 @@ export function ClientAccountDeletion({api}){
   {error&&<div className="error-banner" role="alert">{error}</div>}
   {!account?<p>Loading account details…</p>:<>
    <Scope account={account}/>
-   {new URLSearchParams(location.search).get('account_delete_auth')==='failed'&&<p role="alert">Identity confirmation failed. Try again with the provider account linked to this Levr account.</p>}
-   {account.reauthenticated?<p className="notice" role="status">Identity confirmed for this session. Complete deletion within five minutes, or confirm again.</p>:<>
-    {account.socialProviders.length>0&&<><p>Confirm with your linked sign-in provider, or enter your account password if you have set one.</p><div className="account-actions">{account.socialProviders.map(p=><button className="button" key={p.provider} type="button" disabled={busy||!p.available} onClick={()=>reauthenticate(p.provider)}>Confirm with {p.provider==='google'?'Google':'Facebook'}</button>)}</div>{account.socialProviders.some(p=>!p.available)&&<p className="caption">A linked provider is unavailable. Contact Levr if you cannot confirm with a password.</p>}</>}
-   </>}
+   {account.hasLegacySocialIdentity&&<p className="caption">If you previously used Google or Facebook and have not set a password, ask Levr for a password reset link before deleting your account.</p>}
    <form onSubmit={submit}>
     <label className="field">Type your email to confirm: {account.email}<input type="email" name="confirmationEmail" autoComplete="off" required value={confirm} onChange={e=>setConfirm(e.target.value)} disabled={busy}/></label>
-    {!account.reauthenticated&&<label className="field">Confirm account password<input name="deletionPassword" type="password" autoComplete="current-password" maxLength={1024} value={password} onChange={e=>setPassword(e.target.value)} required disabled={busy}/></label>}
-    <button className="button primary" type="submit" disabled={busy||confirm.trim().toLowerCase()!==account.email||(!account.reauthenticated&&!password)}>{busy?'Deleting…':'Permanently delete my account'}</button>
+    <label className="field">Confirm account password<input name="deletionPassword" type="password" autoComplete="current-password" maxLength={1024} value={password} onChange={e=>setPassword(e.target.value)} required disabled={busy}/></label>
+    <button className="button primary" type="submit" disabled={busy||confirm.trim().toLowerCase()!==account.email||!password}>{busy?'Deleting…':'Permanently delete my account'}</button>
    </form>
   </>}
  </section>;

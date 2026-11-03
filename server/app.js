@@ -51,7 +51,7 @@ export function createApp(options={}){
  app.get('/healthz',(req,res)=>res.json({ok:true}));
  app.get('/auth/signup-config',(req,res)=>res.json({enabled:signupEnabled,providers:socialSignup.available(),social:socialSignup.context(req),consentText:CONSENT_TEXT}));
  app.post('/auth/signup',a.signup);
- socialSignup.registerRoutes(app,{signIn:a.socialLogin});
+ socialSignup.registerRoutes(app);
  app.post('/auth/accept-invite',a.acceptInvite);
  app.post('/auth/reset-password',a.resetPassword);
  app.post('/auth/login',a.login);app.post('/auth/logout',a.requireAuth,a.logout);

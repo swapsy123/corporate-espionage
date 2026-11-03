@@ -15,7 +15,7 @@ export default function SignupLeads({api}) {
    <ol><li>In your Levr GHL subaccount, create a workflow with an <strong>Inbound Webhook</strong> trigger.</li><li>Save its URL as <code>LEVR_SIGNUP_WEBHOOK_URL</code> in this free app’s Render environment, then deploy.</li><li>Complete a test signup, capture its payload in GHL, and map the fields in a <strong>Create/Update Contact</strong> action.</li></ol>
    <p className="caption">Map first_name → first name, last_name → last name, email → email, company_name → company, website → website, and phone → phone. Preserve full_name in a custom field if needed. Use event_id for deduplication and email to match contacts. Keep existing opt-outs. Marketing follow-up requires marketing_email_opt_in to be true; this form does not collect SMS permission.</p>
    <p className="caption">“Webhook accepted” confirms the handoff. Check GHL’s workflow history to confirm the contact action completed. Failed deliveries stay saved here for manual retry.</p>
-   <p className="caption">Campaign tracking: map utm_source, utm_medium, utm_campaign, utm_content and utm_term to the matching GHL custom fields. These follow the visitor through signup, including Google and Facebook. Open “Captured fields” on a lead to inspect them.</p>
+   <p className="caption">Campaign tracking: map utm_source, utm_medium, utm_campaign, utm_content and utm_term to the matching GHL custom fields. These follow the visitor from their landing page through signup. Open “Captured fields” on a lead to inspect them.</p>
   </section>
   {!data?<p role="status">Loading signups…</p>:<>
    <div className="section-heading"><h2>Signup leads</h2><span className="caption">{data.total} total</span></div>

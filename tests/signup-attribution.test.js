@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {ATTRIBUTION_KEY,captureSignupAttribution,clearSignupAttribution} from '../client/signup-attribution.js';
 const storage=()=>{const values=new Map();return{getItem:key=>values.get(key),setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)}};
-test('Campaign fields survive untagged navigation and OAuth, while a new campaign replaces the previous set',()=>{
+test('Campaign fields survive untagged navigation and reloads, while a new campaign replaces the previous set',()=>{
  const store=storage(),initial={utm_source:'instagram',utm_medium:'paid_social',utm_campaign:'free-library',utm_content:'carousel 1',utm_term:'growth operators'};
  assert.deepEqual(captureSignupAttribution('?'+new URLSearchParams({...initial,access_token:'do-not-save'}),store,1000),initial);
  assert.deepEqual(captureSignupAttribution('',store,2000),initial);
