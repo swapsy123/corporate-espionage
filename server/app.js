@@ -14,6 +14,8 @@ import {verifyProviderAccount} from './provider-connection.js';
 import {createLeadDelivery} from './lead-delivery.js';
 import {createSocialSignup} from './social-signup.js';
 import {CONSENT_TEXT} from './signup-input.js';
+import {createAccountDeletion} from './account-deletion.js';
+import {registerAccountDeletion,registerMetaDeletion} from './account-deletion-routes.js';
 import {findPatterns,generateBrief,askLibrary} from './intelligence.js';
 const text=z.string().trim().min(1).max(500);
 const stages=z.enum(['Saved','Briefing','Creating','Launched','Winner']);
@@ -40,9 +42,11 @@ export function createApp(options={}){
  const leadDelivery=createLeadDelivery(catalog,options.leadDeliveryOptions);
  const socialSignup=createSocialSignup(catalog,{production:options.production,signupEnabled,...options.socialSignupOptions});
  const app=express(),a=auth(catalog,{...options,signupEnabled,leadDelivery,socialSignup}),collector=options.collector||collectProfile,verifyProvider=options.verifyProvider||verifyProviderAccount;
+ const deletion=createAccountDeletion(catalog,{manager,vault,leadDelivery,ownerEmail:a.ownerEmail,logger:options.deletionLogger});
  app.disable('x-powered-by');if(process.env.TRUST_PROXY==='1')app.set('trust proxy',1);
  app.use(helmet({contentSecurityPolicy:{directives:{defaultSrc:["'self'"],scriptSrc:["'self'"],styleSrc:["'self'","'unsafe-inline'"],fontSrc:["'self'"],imgSrc:["'self'",'https:','data:'],mediaSrc:["'self'",'https:','blob:'],connectSrc:["'self'"],frameSrc:['https://www.youtube-nocookie.com','https://www.youtube.com'],upgradeInsecureRequests:process.env.NODE_ENV==='production'?[]:null}},crossOriginEmbedderPolicy:false}));
  app.use(express.json({limit:'100kb'}));
+ registerMetaDeletion(app,{db:catalog,deletion,social:socialSignup});
  app.use((req,res,next)=>{res.setHeader('Cache-Control','no-store');if(!['GET','HEAD','OPTIONS'].includes(req.method)&&req.headers.origin){let origin;try{origin=new URL(req.headers.origin).host;}catch{return res.status(403).json({error:'Invalid request origin.'});}if(origin!==req.get('host'))return res.status(403).json({error:'Cross-site requests are not allowed.'});}next();});
  app.get('/healthz',(req,res)=>res.json({ok:true}));
  app.get('/auth/signup-config',(req,res)=>res.json({enabled:signupEnabled,providers:socialSignup.available(),social:socialSignup.context(req),consentText:CONSENT_TEXT}));
@@ -55,10 +59,11 @@ export function createApp(options={}){
  app.get('/api/session',(req,res)=>res.json(a.sessionPayload(req)));
  a.registerManagementRoutes(app);
  leadDelivery.registerRoutes(app);
+ registerAccountDeletion(app,{db:catalog,deletion,social:socialSignup,auth:a});
  app.use('/api',manager.middleware);
  app.get('/api/settings/provider',(req,res)=>res.json(vault.status(req.workspaceId)));
- app.put('/api/settings/provider',async(req,res)=>{const v=z.object({apiKey:z.string().trim().min(1).max(4096).regex(/^[\x21-\x7e]+$/,'Use an API key without spaces or line breaks.')}).parse(req.body);const account=await verifyProvider({apiKey:v.apiKey});res.json({...vault.set(req.workspaceId,v.apiKey,{verifiedAt:now()}),currentCredits:account.creditCount});});
- app.post('/api/settings/provider/verify',async(req,res)=>{const apiKey=vault.get(req.workspaceId);if(!apiKey)return res.status(400).json({error:'Add this workspace’s ScrapeCreators API key before checking the connection.'});const account=await verifyProvider({apiKey});res.json({...vault.markVerified(req.workspaceId,apiKey),currentCredits:account.creditCount});});
+ app.put('/api/settings/provider',async(req,res)=>{const v=z.object({apiKey:z.string().trim().min(1).max(4096).regex(/^[\x21-\x7e]+$/,'Use an API key without spaces or line breaks.')}).parse(req.body);const account=await verifyProvider({apiKey:v.apiKey});if(!manager.canAccess(req))return res.status(410).json({error:'Workspace access has been removed.'});res.json({...vault.set(req.workspaceId,v.apiKey,{verifiedAt:now()}),currentCredits:account.creditCount});});
+ app.post('/api/settings/provider/verify',async(req,res)=>{const apiKey=vault.get(req.workspaceId);if(!apiKey)return res.status(400).json({error:'Add this workspace’s ScrapeCreators API key before checking the connection.'});const account=await verifyProvider({apiKey});if(!manager.canAccess(req))return res.status(410).json({error:'Workspace access has been removed.'});res.json({...vault.markVerified(req.workspaceId,apiKey),currentCredits:account.creditCount});});
  app.delete('/api/settings/provider',(req,res)=>res.json(vault.delete(req.workspaceId)));
  const runningByWorkspace=new Map(),queues=new Map();
  const runningFor=id=>{if(!runningByWorkspace.has(id))runningByWorkspace.set(id,new Set());return runningByWorkspace.get(id);};
@@ -71,13 +76,14 @@ export function createApp(options={}){
  app.post('/api/competitors/:id/profiles',(req,res)=>{const v=z.object({platform:z.enum(['meta','instagram','youtube']),identifier:text,label:z.string().max(500).optional()}).parse(req.body);if(!db.prepare('SELECT 1 FROM competitors WHERE id=? AND archived=0').get(req.params.id))return res.status(404).json({error:'Competitor not found.'});let identifier;try{identifier=normalizeIdentifier(v.platform,v.identifier);}catch(e){return res.status(400).json({error:e.message});}const pid=id();db.prepare('INSERT INTO profiles(id,competitor_id,platform,identifier,label) VALUES (?,?,?,?,?)').run(pid,req.params.id,v.platform,identifier,v.label||identifier);res.status(201).json(profileRow(db.prepare('SELECT * FROM profiles WHERE id=?').get(pid)));});
  app.patch('/api/profiles/:id',(req,res)=>{const v=z.object({confirmed:z.boolean().optional(),identifier:text.optional(),label:z.string().max(500).optional()}).parse(req.body);const p=db.prepare('SELECT * FROM profiles WHERE id=?').get(req.params.id);if(!p)return res.status(404).json({error:'Profile not found.'});let identifier;try{identifier=v.identifier?normalizeIdentifier(p.platform,v.identifier):p.identifier;}catch(e){return res.status(400).json({error:e.message});}const changed=identifier!==p.identifier;db.prepare('UPDATE profiles SET identifier=?,label=?,confirmed=? WHERE id=?').run(identifier,v.label??p.label,changed?0:v.confirmed===undefined?p.confirmed:Number(v.confirmed),p.id);res.json(profileRow(db.prepare('SELECT * FROM profiles WHERE id=?').get(p.id)));});
  app.delete('/api/profiles/:id',(req,res)=>{db.prepare('DELETE FROM profiles WHERE id=?').run(req.params.id);res.json({ok:true});});
- async function refreshCompetitor(c,jobId,running,providerKey){
+ async function refreshCompetitor(c,jobId,running,providerKey,workspaceId){
+  if(!manager.isActive(workspaceId))return;
   const errors=[],warnings=[];let count=0;
   const profiles=db.prepare('SELECT * FROM profiles WHERE competitor_id=? AND confirmed=1').all(c.id).map(profileRow);
   if(!profiles.length)errors.push('Confirm at least one profile before refreshing this competitor.');
   for(const p of profiles){
-   try{const result=await collector(p,{apiKey:providerKey});if(!Array.isArray(result.items))throw Error('Provider response was incomplete.');persistProfileItems(db,p,result.items,result.complete);count+=result.items.length;warnings.push(...(result.warnings||[]));}
-   catch(e){errors.push(`${p.platform}: ${e.safeMessage||'Collection failed. Check provider credits, profile identifier, network access, and API key in secure settings.'}`);}
+   try{if(!manager.isActive(workspaceId))return;const result=await collector(p,{apiKey:providerKey});if(!manager.isActive(workspaceId))return;if(!Array.isArray(result.items))throw Error('Provider response was incomplete.');persistProfileItems(db,p,result.items,result.complete);count+=result.items.length;warnings.push(...(result.warnings||[]));}
+   catch(e){if(!manager.isActive(workspaceId))return;errors.push(`${p.platform}: ${e.safeMessage||'Collection failed. Check provider credits, profile identifier, network access, and API key in secure settings.'}`);}
   }
   const error=errors.length?errors.join(' '):null;
   db.prepare('UPDATE refreshes SET warnings=? WHERE id=?').run(JSON.stringify(warnings),jobId);
@@ -100,7 +106,7 @@ export function createApp(options={}){
   res.status(202).json({jobId:jobs[0].jid,jobIds:jobs.map(j=>j.jid),queuedCount:jobs.length,skippedCount});
   // A per-workspace queue preserves its database and key across async work.
   const connection=req.workspaceDatabase,workspaceId=req.workspaceId;
-  const queue=(queues.get(workspaceId)||Promise.resolve()).then(()=>manager.run(connection,workspaceId,async()=>{for(const {c,jid} of jobs)await refreshCompetitor(c,jid,running,providerKey);})).catch(()=>manager.run(connection,workspaceId,()=>{for(const {c,jid} of jobs){running.delete(c.id);db.prepare("UPDATE refreshes SET status='failed',finished_at=?,error=? WHERE id=? AND status='running'").run(now(),'Refresh interrupted. Retry the manual refresh.',jid);}}));
+  const queue=(queues.get(workspaceId)||Promise.resolve()).then(()=>{if(!manager.isActive(workspaceId))return;return manager.run(connection,workspaceId,async()=>{for(const {c,jid} of jobs)await refreshCompetitor(c,jid,running,providerKey,workspaceId);})}).catch(()=>{if(!manager.isActive(workspaceId))return;return manager.run(connection,workspaceId,()=>{for(const {c,jid} of jobs){running.delete(c.id);db.prepare("UPDATE refreshes SET status='failed',finished_at=?,error=? WHERE id=? AND status='running'").run(now(),'Refresh interrupted. Retry the manual refresh.',jid);}})}).finally(()=>{if(!manager.isActive(workspaceId)){runningByWorkspace.delete(workspaceId);if(queues.get(workspaceId)===queue)queues.delete(workspaceId)}});
   queues.set(workspaceId,queue);
  });
 
@@ -122,6 +128,6 @@ export function createApp(options={}){
  app.post('/api/ask',async(req,res)=>{const v=z.object({question:z.string().trim().min(2).max(4000),boardId:text.optional()}).parse(req.body);res.json(await askLibrary({items:scopedItems(db,v.boardId),question:v.question}));});
  app.use('/api',(req,res)=>res.status(404).json({error:'Endpoint not found.'}));
  const dist=resolve('dist');if(existsSync(dist)){app.use(express.static(dist,{index:false}));app.get('/{*path}',(req,res)=>res.sendFile(resolve(dist,'index.html')));}
- app.use((err,req,res,next)=>{if(res.headersSent)return next(err);if(err.name==='ProviderConnectionError')return res.status(err.status||502).json({error:err.safeMessage});if(err.name==='SecretVaultError')return res.status(503).json({error:err.safeMessage||'Workspace credential storage is unavailable. Contact Levr.'});if(err instanceof z.ZodError)return res.status(400).json({error:err.issues.map(x=>`${x.path.join('.')}: ${x.message}`).join('; ')});if(err.code?.startsWith('ERR_SQLITE'))return res.status(409).json({error:'This record conflicts with an existing record or a required reference is missing.'});if(err.type==='entity.parse.failed')return res.status(400).json({error:'Request must contain valid JSON.'});res.status(500).json({error:'The operation could not be completed. Previously saved data is preserved.'});});
- return {app,db:catalog,closeWorkspaceDatabases:()=>manager.close(),waitForRefresh:()=>Promise.all([...queues.values()]),waitForLeadDelivery:()=>leadDelivery.wait()};
+ app.use((err,req,res,next)=>{if(res.headersSent)return next(err);if(err.name==='AccountDeletionError')return res.status(err.status).json({error:err.safeMessage});if(err.name==='ProviderConnectionError')return res.status(err.status||502).json({error:err.safeMessage});if(err.name==='SecretVaultError')return res.status(503).json({error:err.safeMessage||'Workspace credential storage is unavailable. Contact Levr.'});if(err instanceof z.ZodError)return res.status(400).json({error:err.issues.map(x=>`${x.path.join('.')}: ${x.message}`).join('; ')});if(err.code?.startsWith('ERR_SQLITE'))return res.status(409).json({error:'This record conflicts with an existing record or a required reference is missing.'});if(err.type==='entity.parse.failed')return res.status(400).json({error:'Request must contain valid JSON.'});res.status(500).json({error:'The operation could not be completed. Previously saved data is preserved.'});});
+ return {app,db:catalog,deleteAccount:deletion.deleteAccount,retryAccountCleanup:deletion.retryCleanup,closeWorkspaceDatabases:()=>manager.close(),waitForRefresh:()=>Promise.all([...queues.values()]),waitForLeadDelivery:()=>leadDelivery.wait()};
 }

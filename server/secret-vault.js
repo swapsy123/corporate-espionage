@@ -1,5 +1,5 @@
 import {createCipheriv,createDecipheriv,createHash,randomBytes} from 'node:crypto';
-import {constants,openSync,closeSync,lstatSync,fstatSync,mkdirSync,chmodSync,readFileSync,writeFileSync,fsyncSync,renameSync,unlinkSync} from 'node:fs';
+import {constants,openSync,closeSync,lstatSync,fstatSync,mkdirSync,chmodSync,readFileSync,writeFileSync,fsyncSync,renameSync,unlinkSync,readdirSync} from 'node:fs';
 import {dirname,resolve,parse,join} from 'node:path';
 
 const MAX_ENVELOPE_BYTES=16384;
@@ -116,7 +116,14 @@ export function createSecretVault({directory,masterKey=process.env.LEVR_SECRET_E
   function remove(workspaceId){
     const path=pathFor(workspaceId);
     try{
-      if(inspectDirectory(storageDirectory)&&inspectFile(path)){unlinkSync(path);syncDirectory(storageDirectory);}
+      if(inspectDirectory(storageDirectory)){
+        // A process crash can leave a ciphertext-only atomic-write temporary
+        // file. Erase only exact artifacts belonging to this workspace.
+        const temporary=new RegExp(`^${workspaceId}\\.[0-9a-f]{24}\\.tmp$`);
+        const paths=[path,...readdirSync(storageDirectory).filter(name=>temporary.test(name)).map(name=>join(storageDirectory,name))];
+        for(const file of paths)if(inspectFile(file))unlinkSync(file);
+        syncDirectory(storageDirectory);
+      }
     }catch{throw new SecretVaultError('The workspace credential could not be removed. Ask Levr to check secure storage settings.');}
     return status(workspaceId);
   }

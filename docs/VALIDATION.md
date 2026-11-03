@@ -1,5 +1,16 @@
 # Local validation record
 
+## Account and lead deletion — 3 November 2026
+
+- All 98 automated tests pass and the production client build passes. Additive migration 008 was inspected and tested against both the legacy owner database and an existing client/signup schema. Existing users, memberships, lead payloads, linked identities and research survive migration; SQLite integrity, foreign keys and migration repeatability pass.
+- Deletion tests verify the account cascade, matching invitations and incomplete social signups, session revocation, exclusively owned database/sidecar/key removal (including interrupted-write ciphertext), owner protection, shared workspace preservation, role/CSRF enforcement, typed-email confirmation, idempotency and transaction rollback before any filesystem change.
+- Failed file cleanup records sanitized retry state after catalog commit. Recovery works both through the owner API and after reopening the catalog in a new service instance. Queued/active webhook requests, refreshes, credential verification and OAuth responses cannot recreate removed account/workspace records. Revoked clients cannot finish replacing a key in a retained shared workspace.
+- Provider confirmation tests use mocks and verify linked identity, initiating-session binding, expiry and final explicit deletion. Meta callback tests verify HMAC tampering rejection, opaque confirmations for matching/unknown identities, incomplete-signup removal, honest pending status during file-cleanup failure and protection of later registrations against replayed requests.
+- The setup-account command was tested against an isolated running server: preview changes nothing, apply removes only the four exact requested aliases, unrelated/unaliased accounts survive, and repetition is safe. It has not been run against production.
+- Desktop/mobile Chromium deletion checks pass for password and Google/Facebook confirmation, typed owner confirmation, cancellation, cleanup retry, selected-workspace fallback and revoked sessions. Screenshots were inspected; no JavaScript errors or horizontal overflow were observed. The signup/UTM browser regression also passes.
+- Commands: `npm test`, `npm run build`, `npm run test:deletion:browser`, `npm run test:signup:browser`. All accounts, secrets and external-provider responses used in these checks are synthetic.
+- Render remains manually deployed. Live Meta registration/verification, real provider reauthentication and production test-account cleanup require the deployment/account-access steps in `docs/SIGNUP.md`. GHL contacts and hosting backups are not erased by local account deletion.
+
 ## Public free signup, social login and GHL lead capture — 2 November 2026
 
 - All 80 automated tests and the production client build pass. Migrations 006 and 007 were inspected and tested on the legacy single-owner database; existing research and confirmed profiles remain unchanged.

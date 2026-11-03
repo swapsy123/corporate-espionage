@@ -114,6 +114,12 @@ export function auth(db,options={}){
   req.user=user;req.session=session;next();
  }
  function logout(req,res){db.prepare('DELETE FROM sessions WHERE token_hash=?').run(req.session.token_hash);cookie(res,'',0);res.json({ok:true});}
+ function confirmDeletionPassword(req,res,input){
+  const rate=rateLimit(req,res);if(!rate)return false;
+  const user=db.prepare('SELECT password_hash FROM users WHERE id=?').get(req.user.id);
+  if(!user||!passwordMatches(input,user.password_hash)){recordFailure(rate);res.status(403).json({error:'Password confirmation failed. Re-enter your account password or confirm with your linked sign-in provider.'});return false}
+  return true;
+ }
  function acceptInvite(req,res){
   const rate=rateLimit(req,res);if(!rate)return;
   const token=req.body?.token,email=normalizeEmail(req.body?.email),input=req.body?.password;
@@ -233,5 +239,5 @@ export function auth(db,options={}){
    db.prepare('UPDATE invites SET revoked_at=coalesce(revoked_at,?) WHERE id=?').run(currentTime(),invite.id);res.json({ok:true});
   });
  }
- return {login,signup,signupEnabled,socialLogin,requireAuth,logout,ownerEmail,sessionPayload,registerManagementRoutes,acceptInvite,resetPassword};
+ return {login,signup,signupEnabled,socialLogin,requireAuth,logout,ownerEmail,sessionPayload,registerManagementRoutes,acceptInvite,resetPassword,confirmDeletionPassword,clearSession:res=>cookie(res,'',0)};
 }

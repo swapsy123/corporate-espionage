@@ -15,7 +15,7 @@ export function createLeadDelivery(db, {
   webhookUrl = process.env.LEVR_SIGNUP_WEBHOOK_URL,
   fetchImpl = globalThis.fetch,
 } = {}) {
-  const config = webhookConfig(webhookUrl), jobs = new Map();
+  const config = webhookConfig(webhookUrl), jobs = new Map(),controllers=new Map();
   let queue = Promise.resolve();
   db.prepare("UPDATE signup_leads SET delivery_status='failed',last_error=? WHERE delivery_status='sending'")
     .run('Delivery was interrupted by a restart. Review and retry this lead.');
@@ -37,9 +37,10 @@ export function createLeadDelivery(db, {
       if (!current) return;
       db.prepare("UPDATE signup_leads SET delivery_status='sending',attempts=attempts+1,last_attempt_at=?,last_error=NULL WHERE id=?").run(timestamp(),id);
       let error = null;
+      const controller=new AbortController();controllers.set(id,controller);
       try {
         const response = await fetchImpl(config.url, {
-          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000),
+          method: 'POST', redirect: 'error', signal: AbortSignal.any([controller.signal,AbortSignal.timeout(15000)]),
           headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Levr-Event-Id': id },
           body: current.payload,
         });
@@ -57,7 +58,7 @@ export function createLeadDelivery(db, {
       // A delivery failure must never become an unhandled rejection or expose payloads.
       db.prepare("UPDATE signup_leads SET delivery_status='failed',last_error=? WHERE id=?")
         .run('Delivery could not be completed. The signup is saved; retry from the lead list.',id);
-    }).finally(() => jobs.delete(id));
+    }).finally(() => {jobs.delete(id);controllers.delete(id)});
     jobs.set(id,job);
     queue = job;
     return { queued: true };
@@ -82,5 +83,5 @@ export function createLeadDelivery(db, {
       res.status(result.queued?202:409).json(result.queued?{queued:true}:{error:result.error});
     });
   }
-  return { status,schedule,registerRoutes,wait:()=>queue };
+  return { status,schedule,registerRoutes,cancel:id=>controllers.get(id)?.abort(),wait:()=>queue };
 }

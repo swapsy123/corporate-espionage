@@ -14,7 +14,8 @@
     "test": "node --test tests/*.test.js",
     "db:migrate": "node server/migrate.js",
     "test:browser": "node scripts/browser-smoke.mjs",
-    "test:signup:browser": "node scripts/browser-signup.mjs"
+    "test:signup:browser": "node scripts/browser-signup.mjs",
+    "test:deletion:browser": "node scripts/browser-account-deletion.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",

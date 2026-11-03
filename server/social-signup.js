@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual, randomBytes } from 'node:crypto';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
 const validToken = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
@@ -48,10 +48,11 @@ export function createSocialSignup(db,options={}) {
     for await(const chunk of response.body){size+=chunk.length;if(size>100000)throw Error('Provider response too large.');chunks.push(Buffer.from(chunk));}
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   }
-  function registerRoutes(app,{signIn}) {
-    app.post('/auth/oauth/:provider/start',(req,res)=>{
+  function start(req,res,reauth=false){
       const name=req.params.provider,p=Object.hasOwn(providers,name)?providers[name]:null;
       if(!p||!available()[name])return res.status(503).json({error:'This sign-in option is not configured yet. Use email and password.'});
+      if(reauth&&(req.user?.role!=='client'||!db.prepare('SELECT 1 FROM social_identities WHERE user_id=? AND provider=?').get(req.user.id,name)))
+        return res.status(403).json({error:'Use a sign-in provider already linked to your own client account.'});
       const now=Date.now(),key=digest(`oauth:${req.ip||'unknown'}`);
       db.prepare('DELETE FROM signup_attempts WHERE expires_at<?').run(now);
       if((db.prepare('SELECT count FROM signup_attempts WHERE key=?').get(key)?.count||0)>=30)
@@ -61,19 +62,26 @@ export function createSocialSignup(db,options={}) {
       db.prepare('DELETE FROM pending_social_signups WHERE expires_at<?').run(now);
       const state=randomBytes(32).toString('base64url'),binding=randomBytes(32).toString('base64url');
       db.prepare('INSERT INTO signup_oauth_states VALUES (?,?,?,?)').run(digest(state),digest(binding),name,now+600000);
+      if(reauth)db.prepare('INSERT INTO account_deletion_challenges VALUES (?,?,?)').run(digest(state),req.user.id,req.session.token_hash);
       cookie(res,bindingCookie,binding,600000);
       const url=new URL(p.authorize);
       const params={client_id:p.id,redirect_uri:`${base}/auth/oauth/${name}/callback`,response_type:'code',state,
         scope:name==='google'?'openid email profile':'public_profile,email'};
       if(name==='google')Object.assign(params,{prompt:'select_account',code_challenge:createHash('sha256').update(binding).digest('base64url'),code_challenge_method:'S256'});
+      if(reauth)Object.assign(params,name==='google'?{max_age:'0'}:{auth_type:'reauthenticate'});
       for(const [key,value]of Object.entries(params))url.searchParams.set(key,value);
       res.json({url:url.href});
-    });
+  }
+  function registerRoutes(app,{signIn}) {
+    app.post('/auth/oauth/:provider/start',(req,res)=>start(req,res));
     app.get('/auth/oauth/:provider/callback',async(req,res)=>{
       const name=req.params.provider,p=Object.hasOwn(providers,name)?providers[name]:null,binding=cookieValue(req,bindingCookie),state=req.query.state;
-      const failed=code=>res.redirect(`/signup?auth_error=${code}`);
+      let challenge;
+      const failed=code=>res.redirect(challenge?'/settings?account_delete_auth=failed':`/signup?auth_error=${code}`);
       if(!p||!available()[name]||!validToken(state)||!validToken(binding))return failed('oauth_failed');
-      const used=db.prepare('DELETE FROM signup_oauth_states WHERE state_hash=? AND browser_hash=? AND provider=? AND expires_at>? RETURNING provider')
+      // Capture the intent before consuming state cascades the challenge row.
+      challenge=db.prepare('SELECT * FROM account_deletion_challenges WHERE state_hash=?').get(digest(state));
+      const used=db.prepare('DELETE FROM signup_oauth_states WHERE state_hash=? AND browser_hash=? AND provider=? AND expires_at>? RETURNING provider,expires_at')
         .get(digest(state),digest(binding),name,Date.now());
       if(!used)return failed('oauth_failed');
       cookie(res,bindingCookie,'',0);
@@ -90,7 +98,16 @@ export function createSocialSignup(db,options={}) {
         const email=typeof profile.email==='string'?profile.email.trim().toLowerCase():null;
         if(name==='google'&&(!validEmail(email)||profile.email_verified!==true))throw Error('Verified Google email required.');
         if(name==='facebook'&&!/^\d+$/.test(subject))throw Error('Invalid Facebook identity.');
+        const deleted=db.prepare('SELECT deleted_at FROM deleted_social_identities WHERE provider=? AND subject_hash=?').get(name,digest(subject));
+        if(deleted&&deleted.deleted_at>=used.expires_at-600000)throw Error('Identity deleted during sign-in.');
         const user=db.prepare('SELECT u.id,u.email,u.disabled FROM social_identities i JOIN users u ON u.id=i.user_id WHERE i.provider=? AND i.subject=?').get(name,subject);
+        if(challenge){
+          const session=db.prepare('SELECT 1 FROM sessions WHERE token_hash=? AND user_id=? AND expires_at>?').get(challenge.session_hash,challenge.user_id,Date.now());
+          if(!session||!user||user.disabled||user.id!==challenge.user_id)throw Error('Reauthentication identity mismatch.');
+          db.prepare('INSERT INTO account_deletion_reauth VALUES (?,?,?) ON CONFLICT(session_hash) DO UPDATE SET expires_at=excluded.expires_at,user_id=excluded.user_id')
+            .run(challenge.session_hash,challenge.user_id,Date.now()+300000);
+          return res.redirect('/settings?account_delete_auth=verified');
+        }
         if(user){
           if(user.disabled||!db.prepare('SELECT 1 FROM memberships WHERE user_id=?').get(user.id))return failed('access_unavailable');
           clear(res);signIn(req,res,{id:user.id,email:user.email,role:'client'});return;
@@ -109,5 +126,21 @@ export function createSocialSignup(db,options={}) {
       clear(res);res.json({ok:true});
     });
   }
-  return {available,pending,context,consume,clear,registerRoutes};
+  function verifyFacebookDeletion(value){
+    if(!providers.facebook.secret||!base)return {unconfigured:true};
+    try{
+      if(typeof value!=='string'||value.length>16000)throw Error();
+      const parts=value.split('.');if(parts.length!==2||parts.some(part=>!part||!/^[A-Za-z0-9_-]+$/.test(part)))throw Error();
+      const [signature,payload]=parts,received=Buffer.from(signature,'base64url');
+      if(received.length!==32||received.toString('base64url')!==signature)throw Error();
+      const expected=createHmac('sha256',providers.facebook.secret).update(payload).digest();
+      if(!timingSafeEqual(received,expected))throw Error();
+      const decoded=Buffer.from(payload,'base64url');if(decoded.toString('base64url')!==payload)throw Error();
+      const data=JSON.parse(decoded.toString('utf8'));
+      if(data.algorithm!=='HMAC-SHA256'||typeof data.user_id!=='string'||!/^\d{1,255}$/.test(data.user_id))throw Error();
+      if(!Number.isSafeInteger(data.issued_at)||data.issued_at<=0||data.issued_at>Math.floor(Date.now()/1000)+300)throw Error();
+      return {subject:data.user_id,issuedAt:data.issued_at*1000};
+    }catch{return null}
+  }
+  return {available,pending,context,consume,clear,registerRoutes,startDeletionReauth:(req,res)=>start(req,res,true),verifyFacebookDeletion,publicBaseUrl:base};
 }

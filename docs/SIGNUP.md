@@ -100,3 +100,80 @@ Facebook may omit email; the completion form then asks for it. The app does not 
 ## Live acceptance
 
 Verify one email/password signup, one Google signup and one Facebook signup, including Facebook's no-email case where available. Confirm the workspace opens immediately, an existing email cannot be silently relinked, private endpoints reject another client's workspace, GHL maps the correct fields, unchecked consent avoids marketing enrolment, duplicate delivery does not duplicate contacts/follow-up, and a failed webhook can be retried without losing the user. Real provider credentials and a published GHL workflow are required for this final live check; local mocks do not establish it.
+
+## Account and lead deletion
+
+Migration **008_account_deletion.sql** is additive. It creates deletion audit, file-cleanup, social confirmation and Meta confirmation tables without dropping or rewriting existing account/research tables. No existing customer is deleted by migration, and no timed retention or purge job is introduced.
+
+The shared `createAccountDeletion(...).deleteAccount(userId, { reason, actorId })` service is used by owner deletion, client deletion, Meta callbacks and the setup-account cleanup command. Supported reasons are `owner_request`, `self_service`, `meta_request` and `setup_cleanup`. Fixed reason codes keep free-form personal data out of the audit.
+
+Deletion removes the account's sessions, memberships, social identities, signup lead payload, matching invitations/reset links, user record and associated incomplete social signups. Deletion challenges/grants are removed too. The owner has no client user row and cannot be deleted; the Levr owner workspace is protected. Deleting an already-deleted account succeeds idempotently and can resume pending file cleanup.
+
+Exclusively associated workspaces are removed, including research databases, SQLite sidecar files and encrypted ScrapeCreators credentials, including orphaned ciphertext from interrupted atomic writes. Cached database handles are closed first. Shared workspaces remain available to other accounts. An empty workspace still referenced by another account's signup is also retained until that association is removed, avoiding deletion of another person's lead or a broken foreign key. The confirmation screen identifies which workspaces will be removed or retained. Invitations to a removed workspace are deleted too.
+
+All catalog changes commit in one transaction before file cleanup. A failed transaction preserves the account and files. If file cleanup fails after commit, access stays revoked and a durable, sanitized cleanup record remains. The owner can retry in **Client workspaces → Deletion records**, including after restart. No automatic cleanup schedule is added.
+
+The audit retains the account UUID, SHA-256 of its normalized email, deletion time, actor role/UUID where applicable, fixed reason, cleanup progress and original signup event ID. It does not retain email, name, company, original lead payload, password hash, API key or OAuth credentials. Hashed provider-subject markers stop old OAuth responses and repeated Meta callbacks from affecting a later registration. Audit/marker retention periods remain undecided; these hashes are pseudonymous data, not proof of anonymization. Global short-lived IP attempt buckets and unlinked OAuth state have no user ID association and keep their existing expiry behavior.
+
+Deletion removes active database records, with SQLite secure deletion enabled for freed catalog pages. Hosting backups, snapshots and database journal retention require separate operational handling. This is not a guarantee of erasure from all historical backups.
+
+**GoHighLevel remains separate.** The inbound webhook cannot erase a contact already received by GHL. Queued deliveries are skipped and active requests are aborted where possible, but an already-received request cannot be recalled. Audit records flag possible CRM follow-up and retain the signup `event_id` so the owner can locate the contact without keeping the deleted email here. Handle that CRM record and any backups separately under the applicable privacy policy. The public Meta status page reports active-app deletion, not those external steps. Account deletion does not cancel a ScrapeCreators subscription.
+
+### Owner and client controls
+
+The owner opens **Client workspaces → Client accounts**, finds the account (including accounts with revoked memberships), selects **Delete account**, reviews the scope and types the email. Membership revocation remains a separate action and does not delete the account.
+
+Clients open **Workspace settings → Delete your account**, review the scope, type their email and re-enter their password. Social-only users confirm through their already-linked Google or Facebook identity using a fresh, browser-bound OAuth exchange. The confirmation is tied to the initiating session, expires after five minutes and never deletes automatically: the client must still press the final delete button. An unrelated provider identity or another browser session cannot authorize deletion. No email-based account linking is introduced.
+
+Authenticated deletion routes sit before workspace-scoping middleware and retain role and CSRF checks:
+
+| Route | Access / purpose |
+| --- | --- |
+| `GET /api/accounts?email=...&page=1` | Owner: list/search by exact email |
+| `GET /api/accounts/:userId/deletion` | Owner: preview deletion scope |
+| `DELETE /api/accounts/:userId` | Owner: typed `confirmationEmail` |
+| `GET /api/account-deletions?page=1` | Owner: audit and cleanup records |
+| `POST /api/account-deletions/:id/retry` | Owner: retry recorded file cleanup |
+| `GET /api/account/deletion` | Client: own scope and confirmation methods |
+| `POST /api/account/deletion/reauth/:provider` | Client: start linked-provider confirmation |
+| `DELETE /api/account` | Client: own account; `confirmationEmail` plus password or current provider confirmation |
+
+### Meta data-deletion callback
+
+After deploying, register this **Data Deletion Request Callback URL** in the Facebook Login app settings:
+
+```text
+https://levr-competitor-analysis.onrender.com/auth/oauth/facebook/data-deletion
+```
+
+`POST /auth/oauth/facebook/data-deletion` accepts Meta's form-encoded `signed_request` (JSON also works). It verifies the base64url signature using HMAC-SHA256 and `LEVR_META_LOGIN_APP_SECRET`, checks the declared algorithm, numeric Facebook subject and issued timestamp, and rejects tampering. `PUBLIC_BASE_URL` or `RENDER_EXTERNAL_URL` supplies the trusted absolute status URL, never the request Host header. This signature-authenticated callback requires no browser session or CSRF token.
+
+The response contains `url` and `confirmation_code`. Unknown identities receive the same response shape and a valid confirmation page, without disclosure that the account was unknown. Incomplete Facebook registrations are removed where applicable. Repeated callbacks cannot delete a later account registered after the original request. When file cleanup needs retry, associated confirmation pages remain pending until cleanup succeeds.
+
+`GET /auth/oauth/facebook/data-deletion/:code` is a public, non-cached status page. Codes are random and only their hashes are stored; the page contains no email, account ID or provider subject. The callback implementation does not itself establish Meta Live-mode approval or replace an accurate privacy/deletion policy.
+
+### Remove the four setup accounts
+
+After manual deployment, run in the **existing free service's Render Shell**, using its existing environment:
+
+```sh
+node scripts/delete-setup-accounts.mjs
+node scripts/delete-setup-accounts.mjs --apply
+```
+
+The first command previews; the second deletes only these exact aliases, if present:
+
+- `braceyfraser+levrtest1@gmail.com`
+- `braceyfraser+levrtest2@gmail.com`
+- `braceyfraser+levrtest3@gmail.com`
+- `braceyfraser+levrtest4@gmail.com`
+
+The command signs into the running service over loopback with the existing `LEVR_OWNER_PASSWORD` and `OWNER_EMAIL`, then calls the shared deletion API. It prints counts, never credentials. This lets the running process close its own database connections and cancel queued deliveries. Do not paste credentials into the shell or run direct/offline deletion SQL while the app is running. The unaliased account, `+levrtest5`, unrelated clients and paid ARPRA remain untouched. Re-running is safe.
+
+If cleanup remains pending, inspect **Deletion records**, or explicitly retry previously requested file cleanup:
+
+```sh
+node scripts/delete-setup-accounts.mjs --retry-cleanup
+```
+
+This retries pending file-cleanup records only; it does not discover or delete new accounts. Verify the four test contacts separately in GHL using their signup event IDs.
