@@ -25,3 +25,8 @@
 .account-deletion,.account-administration{margin-top:40px}.account-deletion{max-width:760px}.account-deletion form{margin-top:24px}.account-actions{display:flex;gap:16px;flex-wrap:wrap;margin:16px 0}.account-delete-dialog{background:var(--surface-ground,#fbfaf8);color:var(--ink,#121212);border:1px solid var(--hairline,#e3e0da);padding:32px;width:min(620px,calc(100% - 32px));max-height:90vh;overflow:auto}.account-delete-dialog::backdrop{background:rgba(18,18,18,.4)}.account-delete-dialog li{margin:8px 0;overflow-wrap:anywhere}.account-search{display:flex;gap:16px;align-items:end;margin-bottom:24px}.account-search .field{flex:1;margin:0}.account-row{display:flex;justify-content:space-between;align-items:center;gap:16px}.account-row strong,.account-reference{overflow-wrap:anywhere}.account-administration details{margin:16px 0}.account-administration dd{overflow-wrap:anywhere}@media(max-width:650px){.account-row,.account-search{align-items:stretch;flex-direction:column}.account-delete-dialog{padding:24px}}
 
 .account-deletion form,.account-delete-dialog form{display:grid;gap:16px}
+
+.media-refresh-controls{margin-top:20px;padding-top:20px;border-top:1px solid var(--line)}
+.media-refresh-controls>.caption{margin:12px 0;max-width:520px}
+.media-refresh-controls .error-banner{margin:16px 0 0}
+.media-refresh-controls .button{white-space:normal}

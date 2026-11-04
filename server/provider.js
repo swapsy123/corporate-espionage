@@ -1,5 +1,5 @@
 /** Server-only adapter. API contract checked against official @scrapecreators/cli 1.0.87. */
-import {metaAdLibraryReviewUrl} from '../shared/meta-ad-library.js';
+import {metaAdLibraryReviewUrl,metaPageIdentifier} from '../shared/meta-ad-library.js';
 const API = 'https://api.scrapecreators.com';
 export class ProviderError extends Error {
   constructor(message) { super(message); this.name = 'ProviderError'; this.safeMessage = message; }
@@ -26,7 +26,7 @@ function blank() {
     active: null, views: null, likes: null, comments: null, shares: null, totalEngagement: null };
 }
 function mediaEntry(item) {
-  const thumbnail = url(first(item.image_versions2?.candidates?.[0]?.url, item.display_uri, item.display_url, item.thumbnail, item.video_preview_image_url));
+  const thumbnail = [item.image_versions2?.candidates?.[0]?.url, item.display_uri, item.display_url, item.thumbnail_src, item.thumbnail, item.video_preview_image_url].map(url).find(Boolean)||null;
   const video = url(first(item.video_versions?.[0]?.url, item.video_url, item.video_hd_url, item.video_sd_url, item.video_hd_handle, item.video_sd_handle));
   const image = url(first(item.original_image_url, item.resized_image_url, item.image_url, item.image, thumbnail));
   return video ? {type:'video', url:video, thumbnail:thumbnail || image} : image ? {type:'image', url:image} : null;
@@ -86,13 +86,7 @@ export function normalizeYouTube(r, format) {
 function identifier(profile) {
   let value = cleanText(profile.identifier);
   if (profile.platform === 'meta') {
-    if (value.startsWith('http')) {
-      const u = new URL(value);
-      if (!['facebook.com','www.facebook.com','m.facebook.com'].includes(u.hostname)) throw new ProviderError('Use a confirmed numeric Meta Page ID or Facebook Ad Library page URL.');
-      value = u.searchParams.get('view_all_page_id') || u.searchParams.get('id') || u.pathname.split('/').filter(Boolean).find(x=>/^\d+$/.test(x)) || '';
-    }
-    if (!/^\d+$/.test(value)) throw new ProviderError('Confirm the numeric Meta Page ID from the Ad Library before refreshing. A brand name is not a confirmed page.');
-    return {pageId:value};
+    try{return {pageId:metaPageIdentifier(value)}}catch(error){throw new ProviderError(error.message)}
   }
   if (value.startsWith('http')) {
     const u = new URL(value);
@@ -104,6 +98,24 @@ function identifier(profile) {
   value = value?.replace(/^@/,'');
   if (!value || !/^[\w.\-]{1,100}$/.test(value)) throw new ProviderError('Enter a valid confirmed profile handle or YouTube channel ID.');
   return profile.platform === 'youtube' && value.startsWith('UC') ? {channelId:value} : {handle:value};
+}
+/** Explicit user action: renew one stored Instagram post's media, not its research. */
+export async function refreshInstagramMedia(item,options={}){
+ let source;
+ try{
+  source=new URL(item.sourceUrl);
+  if(item.platform!=='instagram'||!['https:','http:'].includes(source.protocol)||!['instagram.com','www.instagram.com'].includes(source.hostname)||source.username||source.password||!/^\/(p|reel)\/[\w-]+\/?$/.test(source.pathname))throw Error();
+ }catch{throw new ProviderError('This record needs a valid original Instagram post link before its media can be refreshed.')}
+ const shortcode=source.pathname.split('/')[2];
+ const response=await client(options)('/v1/instagram/post',{url:`https://www.instagram.com${source.pathname}`,include_play_count:false});
+ const record=response.data?.xdt_shortcode_media;
+ if(!record||String(record.id)!==String(item.externalId)||record.shortcode!==shortcode)throw new ProviderError('Instagram returned a different or incomplete post. Existing media was preserved.');
+ const carousel=record.__typename==='XDTGraphSidecar'||record.edge_sidecar_to_children;
+ const rows=carousel?record.edge_sidecar_to_children?.edges?.map(edge=>edge?.node):[record];
+ if(!Array.isArray(rows)||!rows.length||rows.some(row=>!row||!mediaEntry(row)))throw new ProviderError('Instagram did not return usable media for every slide. Existing media was preserved.');
+ const media=rows.map(mediaEntry),thumbnail=[record.display_url,record.thumbnail_src,media[0]?.thumbnail,media[0]?.type==='image'?media[0].url:null].map(url).find(Boolean)||null;
+ if(!thumbnail&&!media.length)throw new ProviderError('Instagram did not return usable media. Existing media was preserved.');
+ return {media,thumbnail};
 }
 function client({apiKey = process.env.SCRAPECREATORS_API_KEY, fetchImpl = globalThis.fetch, signal} = {}) {
   if (!apiKey) throw new ProviderError('ScrapeCreators is not configured. Add SCRAPECREATORS_API_KEY in the server secret settings, then refresh again.');
@@ -180,6 +192,7 @@ export async function collectProfile(profile,options={}) {
     const result=await pages({request,path:'/v1/facebook/adLibrary/company/ads',params:{...params,status:'ACTIVE',country:'ALL'},key:'results',field:'cursor',method:'POST',onProgress:options.onProgress});
     if (result.records.some(r => typeof r.is_active !== 'boolean')) throw new ProviderError('Meta did not report whether an ad is active. Refresh stopped without replacing prior records.');
     items=result.records.filter(r=>r.is_active===true).map(normalizeMetaAd);
+    if(!items.length)warnings.push(`Meta returned no active ads for Page ${params.pageId} across all countries. Verify the advertiser Page ID. The review page can also show inactive ads, which are not collected into the active-ad library.`);
   } else if(profile.platform==='instagram') {
     const result=await pages({request,path:'/v2/instagram/user/posts',params,key:'items',field:'next_max_id',limit,onProgress:options.onProgress});
     items=result.records.map(normalizeInstagram);exhausted=result.exhausted;

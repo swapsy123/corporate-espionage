@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { collectProfile, normalizeMetaAd, normalizeInstagram, normalizeYouTube, searchMetaCompanies } from '../server/provider.js';
+import { collectProfile, normalizeMetaAd, normalizeInstagram, normalizeYouTube, searchMetaCompanies, refreshInstagramMedia } from '../server/provider.js';
 // Shapes and field names from the official @scrapecreators/cli 1.0.87 API examples.
 const ad = (id='1162496978867592', extra={}) => ({ad_archive_id:id,is_active:true,page_id:'367152833370567',page_name:'Example advertiser',start_date:1740643200,snapshot:{body:{text:'A sourced ad caption'},title:'Headline',cta_text:'Learn more',link_url:'https://example.com/offer',display_format:'IMAGE',images:[{original_image_url:'https://cdn.example.com/ad.jpg'}]},...extra});
 const ig = (id='3600545900919030401',extra={}) => ({pk:id,id:`${id}_260462810`,code:'ExamplePost',media_type:2,product_type:'clips',created_at:'2025-03-31T16:29:30.000Z',taken_at:1743438570,caption:{text:'Actual caption'},like_count:14,comment_count:2,ig_play_count:1000,play_count:1200,image_versions2:{candidates:[{url:'https://cdn.example.com/cover.jpg'}]},video_versions:[{url:'https://cdn.example.com/video.mp4'}],...extra});
@@ -106,4 +106,28 @@ test('Unreported active state fails instead of silently deactivating stored ads'
 test('Dedicated Shorts identity wins if a video also appears in the ordinary feed',async()=>{
  const m=mock([{shorts:[video()],continuationToken:null},video(),{videos:[video()],continuationToken:null},video(),{transcript_only_text:null}]);
  const r=await collectProfile({platform:'youtube',identifier:'example',confirmed:true},options(m.fetchImpl));assert.equal(r.items.length,1);assert.equal(r.items[0].format,'youtube_short');
+});
+
+test('Meta collection takes the advertiser ID from combined URLs and rejects individual ad links',async()=>{
+ const m=mock([{results:[],cursor:null}]);
+ const result=await collectProfile({platform:'meta',identifier:'https://www.facebook.com/ads/library/?id=999&view_all_page_id=123',confirmed:true},options(m.fetchImpl));
+ assert.equal(m.calls[0].params.pageId,'123');assert.match(result.warnings[0],/no active ads/);
+ const count=m.calls.length;
+ await assert.rejects(collectProfile({platform:'meta',identifier:'https://www.facebook.com/ads/library/?id=999',confirmed:true},options(m.fetchImpl)),/individual ad link/);
+ assert.equal(m.calls.length,count);
+});
+test('Explicit Instagram media refresh retrieves the exact post without transcription or bulk collection',async()=>{
+ const m=mock([{data:{xdt_shortcode_media:{id:'123',shortcode:'Fixture',__typename:'XDTGraphVideo',display_url:'https://cdn.example.com/fresh.jpg',video_url:'https://cdn.example.com/fresh.mp4'}}}]);
+ const result=await refreshInstagramMedia({platform:'instagram',externalId:'123',sourceUrl:'https://www.instagram.com/reel/Fixture/'},options(m.fetchImpl));
+ assert.equal(result.thumbnail,'https://cdn.example.com/fresh.jpg');assert.deepEqual(result.media,[{type:'video',url:'https://cdn.example.com/fresh.mp4',thumbnail:'https://cdn.example.com/fresh.jpg'}]);
+ assert.equal(m.calls.length,1);assert.equal(m.calls[0].path,'/v1/instagram/post');assert.equal(m.calls[0].params.include_play_count,'false');assert.equal(m.calls[0].params.download_media,undefined);
+});
+test('Instagram media renewal preserves slide order and rejects mismatched or incomplete responses',async()=>{
+ const item={platform:'instagram',externalId:'123',sourceUrl:'https://www.instagram.com/p/Fixture/'};
+ const record={id:'123',shortcode:'Fixture',__typename:'XDTGraphSidecar',edge_sidecar_to_children:{edges:[{node:{display_url:'https://cdn.example.com/first.jpg'}},{node:{display_url:'https://cdn.example.com/second.jpg'}}]}};
+ const m=mock([{data:{xdt_shortcode_media:record}}]);assert.deepEqual((await refreshInstagramMedia(item,options(m.fetchImpl))).media.map(m=>m.url),['https://cdn.example.com/first.jpg','https://cdn.example.com/second.jpg']);
+ for(const r of [{...record,id:'456'},{...record,shortcode:'Other'},{...record,edge_sidecar_to_children:{edges:[{node:{display_url:'https://cdn.example.com/first.jpg'}},{node:{}}]}}]){
+  const m=mock([{data:{xdt_shortcode_media:r}}]);await assert.rejects(refreshInstagramMedia(item,options(m.fetchImpl)),/preserved/);
+ }
+ const rejected=mock([]);await assert.rejects(refreshInstagramMedia({...item,sourceUrl:'https://evil.test/p/Fixture/'},options(rejected.fetchImpl)),/original Instagram/);assert.equal(rejected.calls.length,0);
 });

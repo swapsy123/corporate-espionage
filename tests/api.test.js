@@ -102,6 +102,12 @@ test('competitors and profiles require confirmation; pause, edit and archive ret
  assert.equal((await s.req('/api/competitors')).data.length,0);assert.equal((await s.req('/api/items')).data.length,12);
 });
 
+test('Profile connections reject ad IDs from individual ad URLs and prefer advertiser Page IDs',async t=>{
+ const s=await setup(t);await s.login();const c=await s.competitor();
+ const bad=await s.req(`/api/competitors/${c.id}/profiles`,{method:'POST',body:{platform:'meta',identifier:'https://www.facebook.com/ads/library/?id=999'}});assert.equal(bad.status,400);assert.match(bad.data.error,/individual ad link/);
+ const good=await s.req(`/api/competitors/${c.id}/profiles`,{method:'POST',body:{platform:'meta',identifier:'https://www.facebook.com/ads/library/?id=999&view_all_page_id=123'}});assert.equal(good.status,201);assert.equal(good.data.identifier,'123');assert.equal(good.data.confirmed,false);
+});
+
 test('manual refresh deduplicates ads, keeps first-seen dates and preserves records after failures',async t=>{
  const s=await setup(t);await s.login();const c=await s.competitor();await s.profile(c,'meta');
  assert.equal(s.state.calls.length,0,'adding or confirming a source never auto-refreshes');

@@ -48,8 +48,8 @@ test('Relay validates image bytes, caps downloads and revalidates redirects with
 });
 
 async function fixture(t){
- const db=openDatabase(':memory:'),password=randomBytes(24).toString('hex'),state={calls:[],fail:false,gate:null};
- const app=createApp({db,seed:false,password,production:false,collector:async()=>({items:[{externalId:'client-post',kind:'organic',format:'instagram_image',thumbnail:cdn,media:[{type:'image',url:cdn}]}],complete:true}),fetchImage:async(target)=>{state.calls.push(target);if(state.gate)await state.gate;if(state.fail)throw Error('Private remote URL must not leak');return {type:'image/png',body:png}}});
+ const db=openDatabase(':memory:'),password=randomBytes(24).toString('hex'),state={calls:[],fail:false,gate:null,mediaCalls:[],mediaFail:false,mediaGate:null,keys:new Map()};
+ const app=createApp({db,seed:false,password,production:false,vault:{get:workspace=>workspace==='levr'?'owner-test-key':state.keys.get(workspace),status:workspace=>({configured:workspace==='levr'||state.keys.has(workspace)})},refreshMedia:async(item,{apiKey})=>{state.mediaCalls.push({item,apiKey});if(state.mediaGate)await state.mediaGate;if(state.mediaFail)throw Object.assign(Error('Private upstream detail'),{safeMessage:'Instagram media is unavailable. Existing media was preserved.'});return {thumbnail:'https://scontent.test.cdninstagram.com/fresh.jpg',media:[{type:'image',url:'https://scontent.test.cdninstagram.com/fresh.jpg'}]}},collector:async()=>({items:[{externalId:'client-post',kind:'organic',format:'instagram_image',thumbnail:cdn,media:[{type:'image',url:cdn}]}],complete:true}),fetchImage:async(target)=>{state.calls.push(target);if(state.gate)await state.gate;if(state.fail)throw Error('Private remote URL must not leak');return {type:'image/png',body:png}}});
  db.prepare('INSERT INTO competitors(id,name) VALUES (?,?)').run('fixture','Media fixture');
  db.prepare('INSERT INTO profiles(id,competitor_id,platform,identifier,confirmed) VALUES (?,?,?,?,1)').run('profile','fixture','instagram','fixture');
  persistProfileItems(db,{id:'profile',competitorId:'fixture',platform:'instagram'},[{externalId:'post',kind:'organic',format:'instagram_carousel',thumbnail:cdn,media:[{type:'image',url:'https://scontent.test.fbcdn.net/slide.png'},{type:'video',url:'https://scontent.test.fbcdn.net/video.mp4'}],title:'Preserved caption',sourceUrl:'https://www.instagram.com/p/fixture/'}],true);
@@ -91,6 +91,31 @@ test('Client images resolve within their explicit workspace and are denied after
  assert.equal((await f.get(path,f.client.cookie)).status,200);
  assert.equal((await f.get(path,f.owner.cookie)).status,200,'owner can manage the same client media');
  assert.equal((await f.get(path.replace(workspace,'levr'),f.owner.cookie)).status,404,'foreign item IDs cannot use the owner database');
+ const renew=()=>fetch(f.base+`/api/items/${item.id}/media-refresh`,{method:'POST',headers:{Cookie:f.client.cookie,'X-CSRF-Token':f.client.session.csrf,'Content-Type':'application/json'},body:'{}'});
+ assert.equal((await renew()).status,503,'client cannot use the owner provider key');assert.equal(f.state.mediaCalls.length,0);
+ f.state.keys.set(workspace,'client-test-key');assert.equal((await renew()).status,200);assert.equal(f.state.mediaCalls[0].apiKey,'client-test-key');
  f.db.prepare('DELETE FROM memberships WHERE workspace_id=?').run(workspace);
  const count=f.state.calls.length;assert.equal((await f.get(path,f.client.cookie)).status,401);assert.equal(f.state.calls.length,count);
+});
+
+test('Manual media renewal is authenticated, preserves research and records failures without losing old links',async t=>{
+ const f=await fixture(t),path=`/api/items/${f.item.id}/media-refresh`;
+ const post=(actor=f.owner,csrf=actor.session.csrf)=>fetch(f.base+path,{method:'POST',headers:{Cookie:actor.cookie,'X-CSRF-Token':csrf,'Content-Type':'application/json'},body:'{}'});
+ assert.equal((await post(f.owner,'wrong')).status,403);assert.equal(f.state.mediaCalls.length,0);
+ assert.equal((await post(f.client)).status,404);assert.equal(f.state.mediaCalls.length,0);
+ const response=await post();assert.equal(response.status,200);const updated=await response.json();assert.match(updated.thumbnail,/fresh/);assert.equal(f.state.mediaCalls[0].apiKey,'owner-test-key');
+ const previous=JSON.parse(f.item.data),current=JSON.parse(f.db.prepare('SELECT data FROM items WHERE id=?').get(f.item.id).data);
+ for(const key of Object.keys(previous).filter(key=>!['media','thumbnail'].includes(key)))assert.deepEqual(current[key],previous[key],key);
+ assert.ok(current.mediaRefreshedAt);assert.equal(f.db.prepare('SELECT status FROM refreshes').get().status,'success');
+ f.state.mediaFail=true;const failed=await post();assert.equal(failed.status,502);assert.doesNotMatch(JSON.stringify(await failed.json()),/Private upstream|owner-test-key/);
+ const preserved=JSON.parse(f.db.prepare('SELECT data FROM items WHERE id=?').get(f.item.id).data);assert.deepEqual(preserved.media,current.media);assert.equal(preserved.thumbnail,current.thumbnail);assert.equal(preserved.caption,previous.caption);assert.match(preserved.mediaRefreshError,/preserved/);
+ assert.equal(f.db.prepare("SELECT count(*) n FROM refreshes WHERE status='failed'").get().n,1);
+});
+test('Media refresh rejects duplicates and discards responses after session revocation',async t=>{
+ const f=await fixture(t);let release;f.state.mediaGate=new Promise(resolve=>{release=resolve});
+ const post=()=>fetch(f.base+`/api/items/${f.item.id}/media-refresh`,{method:'POST',headers:{Cookie:f.owner.cookie,'X-CSRF-Token':f.owner.session.csrf,'Content-Type':'application/json'},body:'{}'});
+ const first=post();while(!f.state.mediaCalls.length)await new Promise(resolve=>setTimeout(resolve,5));
+ assert.equal((await post()).status,409);assert.equal(f.state.mediaCalls.length,1);
+ f.db.prepare('DELETE FROM sessions').run();release();assert.equal((await first).status,404);assert.equal(f.db.prepare('SELECT data FROM items WHERE id=?').get(f.item.id).data,f.item.data);
+ assert.equal(f.db.prepare('SELECT status FROM refreshes').get().status,'failed','revoked requests do not leave a permanent running history entry');
 });

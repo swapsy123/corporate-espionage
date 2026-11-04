@@ -9,9 +9,15 @@ const db=openDatabase(':memory:');
 const password=randomBytes(24).toString('hex');
 let finishCollection;
 const collectionGate=new Promise(resolve=>{finishCollection=resolve});
+let finishMeta;
+const metaGate=new Promise(resolve=>{finishMeta=resolve});
 const collected=[];
 const {app,waitForRefresh}=createApp({db,password,seed:false,production:false,collector:async profile=>{
   collected.push(profile.identifier);
+  if(profile.platform==='meta'){
+    await metaGate;
+    return {items:[{externalId:'123',kind:'paid',format:'ad_image',title:'New paid creative',caption:'Paid collection fixture.',active:true,startDate:'2026-10-01',sourceUrl:'https://www.facebook.com/ads/library/?id=123',media:[],transcriptStatus:'unavailable'}],complete:true};
+  }
   await collectionGate;
   return {items:[{externalId:'refresh-fixture',kind:'organic',format:'instagram_reel',title:'Collected confirmed profile',caption:'A browser regression fixture.',sourceUrl:'https://www.instagram.com/reel/refresh-fixture/',media:[],transcriptStatus:'unavailable'}],complete:true};
 }});
@@ -74,10 +80,22 @@ try {
   assert.equal(await page.getByRole('button',{name:/Collected confirmed profile/}).count(),0,'different query scope must not retain stale prior-format data');
   finishScopeRequest();
   await page.getByRole('heading',{name:'Your library is ready to grow',exact:true}).waitFor();
+  await page.goto(`${base}/paid`);await page.getByText('Connect a Meta Page for paid ads',{exact:true}).waitFor();
+  db.prepare('INSERT INTO competitors(id,name) VALUES (?,?)').run('meta-fixture','Meta fixture');
+  db.prepare('INSERT INTO profiles(id,competitor_id,platform,identifier,confirmed) VALUES (?,?,?,?,1)').run('meta-profile','meta-fixture','meta','12345');
+  await page.goto(`${base}/competitors`);
+  await page.locator('.competitor-card').filter({has:page.getByRole('heading',{name:'Meta fixture',exact:true})}).getByRole('button',{name:'Refresh',exact:true}).click();
+  await page.goto(`${base}/paid`);
+  await page.getByText('Your manual refresh is running. New results will appear here when collection finishes.',{exact:true}).waitFor();
+  finishMeta();await waitForRefresh();
+  await page.getByRole('button',{name:/New paid creative/}).waitFor();
+  assert.equal(await page.getByText('Your manual refresh is running. New results will appear here when collection finishes.',{exact:true}).count(),0);
+  assert.deepEqual(collected,['confirmed_fixture','12345'],'library polling never starts collection');
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({ok:true,checks:['confirmed-only bulk collection','stable competitor DOM and scroll during polling','duplicate refresh controls disabled','successful completion updates','no stale content across format changes'],errors}));
+  console.log(JSON.stringify({ok:true,checks:['confirmed-only bulk collection','stable DOM and scroll during polling','duplicate refresh controls disabled','successful completion updates','no stale content across format changes','paid connections guidance','paid library updates after manual collection without navigation'],errors}));
 } finally {
   finishCollection();
+  finishMeta();
   await browser.close();
   await new Promise(resolve=>server.close(resolve));
   db.close();

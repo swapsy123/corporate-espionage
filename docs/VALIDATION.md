@@ -1,5 +1,15 @@
 # Local validation record
 
+## Retrieval follow-up — 4 November 2026
+
+- The user reports all Instagram previews unavailable and missing paid ads on the live free site. The live cause is not yet verified: this environment cannot inspect the signed-in Render service or use the workspace's provider key. See `docs/LIVE_RETRIEVAL_CHECK.md` for a browser-based diagnostic handoff.
+- All 109 automated tests and the production build pass. The eight-route desktop/mobile browser smoke and dedicated media and refresh regressions pass. Tests use synthetic provider/CDN responses; no live retrieval is claimed.
+- Meta profile connection and collection now share advertiser Page-ID parsing. An Ad Library URL with both `id` and `view_all_page_id` uses the advertiser ID; a single-ad URL is rejected. Collection still requests active ads across all countries, with a history warning when the provider returns no active ads. Existing numeric connections cannot be identified as wrong automatically and are not rewritten.
+- Paid and organic libraries poll stored status/results while a manual competitor refresh is running, so newly collected items appear after completion without reopening the page. Polling makes no provider requests. Paid ads shows missing confirmed Meta connections and competitor refresh errors.
+- A manual Instagram detail action retrieves that exact post through the documented `/v1/instagram/post` endpoint, checks returned identity and complete carousel media, and replaces only media links. It uses that workspace's key, retains caption/transcript/metrics/opportunity references, and records failures while preserving previous media. It does not enable the provider's additional-cost `download_media` option. Tests cover CSRF, workspace isolation, absent client keys, duplicate calls, session revocation and terminal history states.
+- Browser checks verify successful fresh-link recovery, durable images after reload, failure preservation, source links, carousel navigation, 9:16 views and mobile layout. A mobile screenshot was inspected. The ordinary competitor refresh remains the way to renew recent content in bulk; the single-post action also works for older saved posts outside the recent timeline sample. Provider renewal cannot guarantee that a CDN or deleted original remains available.
+- No schema or deployment-variable changes are required. Render still needs manual deployment; ARPRA is untouched.
+
 ## Meta review filters in the free app — 4 November 2026
 
 - All 103 automated tests, the production build and the desktop/mobile browser smoke pass. The browser checks cover Meta profile review, search-result review and an ad with a previously stored source URL.

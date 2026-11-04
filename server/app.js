@@ -10,6 +10,7 @@ import {createWorkspaceManager} from './workspaces.js';
 import {createSecretVault} from './secret-vault.js';
 import {competitorRows,profileRow,itemRows,persistProfileItems,boardRows,opportunityRows,scopedItems} from './store.js';
 import {collectProfile,searchMetaCompanies} from './provider.js';
+import {metaPageIdentifier} from '../shared/meta-ad-library.js';
 import {verifyProviderAccount} from './provider-connection.js';
 import {createLeadDelivery} from './lead-delivery.js';
 import {createSocialSignup} from './social-signup.js';
@@ -17,21 +18,21 @@ import {CONSENT_TEXT} from './signup-input.js';
 import {createAccountDeletion} from './account-deletion.js';
 import {registerAccountDeletion,registerMetaDeletion} from './account-deletion-routes.js';
 import {registerImageRoutes} from './media-images.js';
+import {registerMediaRefresh} from './media-refresh.js';
 import {findPatterns,generateBrief,askLibrary} from './intelligence.js';
 const text=z.string().trim().min(1).max(500);
 const stages=z.enum(['Saved','Briefing','Creating','Launched','Winner']);
 function normalizeIdentifier(platform,raw){
  let v=raw.trim();
+ if(platform==='meta')return metaPageIdentifier(v);
  if(v.includes('://')){
   let u;try{u=new URL(v);}catch{throw new Error('Enter a valid profile URL or identifier.');}
   const host=u.hostname.replace(/^www\./,'');
   if(platform==='instagram'&&host==='instagram.com')v=u.pathname.split('/').filter(Boolean)[0]||'';
   else if(platform==='youtube'&&['youtube.com','m.youtube.com'].includes(host)){const p=u.pathname.split('/').filter(Boolean);v=p[0]==='channel'?p[1]:p[0];}
-  else if(platform==='meta'&&['facebook.com','m.facebook.com'].includes(host))v=u.searchParams.get('id')||u.searchParams.get('view_all_page_id')||u.pathname.split('/').filter(Boolean).at(-1)||'';
   else throw new Error('The URL does not match the selected platform.');
  }
  if(platform==='instagram'){v=v.replace(/^@/,'').toLowerCase();if(!/^[a-z0-9_.]{1,30}$/.test(v))throw new Error('Use an Instagram handle, such as growth.operators.');}
- if(platform==='meta'&&!/^\d+$/.test(v))throw new Error('Enter the numeric Meta Page ID shown in Meta Ad Library.');
  if(platform==='youtube'&&!/^(@[\w.-]+|UC[\w-]{20,30})$/.test(v))throw new Error('Enter a YouTube @handle or UC channel ID.');
  return v;
 }
@@ -63,6 +64,7 @@ export function createApp(options={}){
  registerAccountDeletion(app,{db:catalog,deletion,social:socialSignup,auth:a});
  registerImageRoutes(app,{db,manager,fetchImage:options.fetchImage});
  app.use('/api',manager.middleware);
+ registerMediaRefresh(app,{db,manager,vault,refreshMedia:options.refreshMedia});
  app.get('/api/settings/provider',(req,res)=>res.json(vault.status(req.workspaceId)));
  app.put('/api/settings/provider',async(req,res)=>{const v=z.object({apiKey:z.string().trim().min(1).max(4096).regex(/^[\x21-\x7e]+$/,'Use an API key without spaces or line breaks.')}).parse(req.body);const account=await verifyProvider({apiKey:v.apiKey});if(!manager.canAccess(req))return res.status(410).json({error:'Workspace access has been removed.'});res.json({...vault.set(req.workspaceId,v.apiKey,{verifiedAt:now()}),currentCredits:account.creditCount});});
  app.post('/api/settings/provider/verify',async(req,res)=>{const apiKey=vault.get(req.workspaceId);if(!apiKey)return res.status(400).json({error:'Add this workspace’s ScrapeCreators API key before checking the connection.'});const account=await verifyProvider({apiKey});if(!manager.canAccess(req))return res.status(410).json({error:'Workspace access has been removed.'});res.json({...vault.markVerified(req.workspaceId,apiKey),currentCredits:account.creditCount});});
