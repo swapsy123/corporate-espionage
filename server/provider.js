@@ -1,4 +1,5 @@
 /** Server-only adapter. API contract checked against official @scrapecreators/cli 1.0.87. */
+import {metaAdLibraryReviewUrl} from '../shared/meta-ad-library.js';
 const API = 'https://api.scrapecreators.com';
 export class ProviderError extends Error {
   constructor(message) { super(message); this.name = 'ProviderError'; this.safeMessage = message; }
@@ -42,7 +43,7 @@ export function normalizeMetaAd(raw) {
     advertiser:cleanText(raw.page_name || s.page_name), title:cleanText(s.title), headline:cleanText(s.title),
     caption:cleanText(typeof s.body === 'string' ? s.body : s.body?.text),
     cta:cleanText(s.cta_text || s.cta_type), landingUrl:url(s.link_url),
-    sourceUrl:`https://www.facebook.com/ads/library/?id=${externalId}`,
+    sourceUrl:metaAdLibraryReviewUrl(`https://www.facebook.com/ads/library/?id=${externalId}`),
     media:uniqueMedia, thumbnail:uniqueMedia[0]?.thumbnail || (uniqueMedia[0]?.type === 'image' ? uniqueMedia[0].url : null),
     startDate:date(first(raw.start_date_string, raw.start_date)), active:raw.is_active === true,
     creativeVariants:(s.cards || []).map(card=>({title:cleanText(card.title),caption:cleanText(card.body),cta:cleanText(card.cta_text),landingUrl:url(card.link_url)})),
@@ -210,5 +211,5 @@ export async function searchMetaCompanies(query,options={}) {
   const q=cleanText(query);if(q.length<2 || q.length>200) throw new ProviderError('Enter a company name between 2 and 200 characters.');
   const data=await client(options)('/v1/facebook/adLibrary/search/companies',{query:q});
   if(!Array.isArray(data.searchResults))throw new ProviderError('ScrapeCreators returned an unexpected company search response.');
-  return data.searchResults.map(r=>({platform:'meta',identifier:String(r.page_id),label:cleanText(r.name),confirmed:false,sourceUrl:`https://www.facebook.com/ads/library/?view_all_page_id=${r.page_id}`}));
+  return data.searchResults.map(r=>({platform:'meta',identifier:String(r.page_id),label:cleanText(r.name),confirmed:false,sourceUrl:metaAdLibraryReviewUrl(`https://www.facebook.com/ads/library/?view_all_page_id=${r.page_id}&search_type=page`)}));
 }

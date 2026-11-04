@@ -1,5 +1,6 @@
 // Isolated synthetic fixtures: never seeds or connects to the production database.
 import {randomBytes} from 'node:crypto';
+import assert from 'node:assert/strict';
 import {createApp} from '../server/app.js';
 import {openDatabase} from '../server/db.js';
 import {persistProfileItems} from '../server/store.js';
@@ -18,21 +19,38 @@ try {
 const page=await browser.newPage({viewport:{width:1440,height:1000}});
 await page.route('https://example.com/**', route=>route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600"><rect width="600" height="600" fill="#f4f2ee"/><text x="50" y="300" fill="#121212">Browser test slide</text></svg>'}));
 const errors=[];page.on('pageerror',e=>errors.push(e.message));
+function checkMetaLink(href,key,value){const u=new URL(href);assert.equal(u.hostname,'www.facebook.com');assert.equal(u.pathname,'/ads/library/');assert.equal(u.searchParams.get(key),value);assert.equal(u.searchParams.get('country'),'ALL');assert.equal(u.searchParams.get('ad_type'),'all');assert.equal(u.searchParams.get('active_status'),'all');}
+async function checkReviewLinks(){
+ await page.goto('http://127.0.0.1:3101/competitors');
+ const row=page.locator('.profile-row').filter({has:page.getByText('Meta Page',{exact:true})});
+ await row.getByRole('button',{name:'Unconfirm',exact:true}).click();
+ const review=row.getByRole('link',{name:'Review profile',exact:true});await review.waitFor();checkMetaLink(await review.getAttribute('href'),'view_all_page_id','123');
+ await row.getByRole('button',{name:'Confirm match',exact:true}).click();
+ await page.getByRole('button',{name:'Connect a profile',exact:true}).click();
+ await page.getByRole('button',{name:'Find Meta Pages',exact:true}).click();
+ const candidate=page.getByRole('link',{name:'Review page',exact:true});await candidate.waitFor();checkMetaLink(await candidate.getAttribute('href'),'view_all_page_id','456');
+ await page.getByRole('button',{name:'Close dialog',exact:true}).click();
+}
+// A legacy/restrictive candidate URL must also be normalized by the rendered link.
+await page.route('**/api/profile-candidates?*',route=>route.fulfill({json:[{platform:'meta',identifier:'456',label:'Meta candidate fixture',confirmed:false,sourceUrl:'https://www.facebook.com/ads/library/?view_all_page_id=456&country=ID&ad_type=political_and_issue_ads&active_status=active'}]}));
+
 await page.goto('http://127.0.0.1:3101');
 await page.getByLabel('Email address',{exact:true}).fill('fraser@wearelevr.com');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Enter workspace'}).click();await page.getByRole('heading',{name:'Your market, in focus.'}).waitFor();
 await page.screenshot({path:'/tmp/levr-overview-desktop.png',fullPage:true});
 for(const [route,title] of [['paid','The paid ad library.'],['organic','Organic intelligence.'],['competitors','Know who you’re watching.'],['opportunities','The Opportunity Lab.'],['patterns','Find the repeating ideas.'],['briefs','A better starting point.'],['ask','Ask a better question.']]){await page.goto(`http://127.0.0.1:3101/${route}`);await page.getByRole('heading',{name:title,exact:true}).waitFor();if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw Error(`Desktop overflow: ${route}`);}
+await checkReviewLinks();
 await page.goto('http://127.0.0.1:3101/organic');await page.getByRole('button',{name:/Browser test instagram_reel/}).click();await page.getByRole('dialog',{name:'Creative details'}).waitFor();const rect=await page.locator('.media-viewer').boundingBox();if(Math.abs(rect.width/rect.height-9/16)>.01)throw Error('Reel is not vertical');await page.screenshot({path:'/tmp/levr-reel-desktop.png',fullPage:true});await page.getByRole('button',{name:'Save opportunity',exact:true}).click();await page.getByRole('button',{name:'Close creative details'}).click();
 await page.getByRole('tab',{name:'Instagram carousels'}).click();await page.getByRole('button',{name:/Browser test instagram_carousel/}).click();await page.getByText('Slide 1 of 2').waitFor();await page.getByRole('button',{name:'Next slide'}).click();await page.getByText('Slide 2 of 2').waitFor();await page.getByRole('button',{name:'Close creative details'}).click();
 await page.getByRole('tab',{name:'YouTube Shorts'}).click();await page.getByRole('button',{name:/Browser test youtube_short/}).click();const short=await page.locator('.media-viewer').boundingBox();if(Math.abs(short.width/short.height-9/16)>.01)throw Error('Short is not vertical');await page.getByRole('button',{name:'Close creative details'}).click();
 await page.getByRole('tab',{name:'YouTube long-form'}).click();await page.getByRole('button',{name:/Browser test youtube_video/}).click();const long=await page.locator('.media-viewer').boundingBox();if(Math.abs(long.width/long.height-16/9)>.01)throw Error('Long-form video is not horizontal');await page.getByRole('button',{name:'Close creative details'}).click();
-await page.goto('http://127.0.0.1:3101/paid');await page.getByRole('button',{name:/Browser test ad_video/}).click();await page.getByRole('button',{name:'Save opportunity',exact:true}).click();await page.getByRole('button',{name:'Close creative details'}).click();
+await page.goto('http://127.0.0.1:3101/paid');await page.getByRole('button',{name:/Browser test ad_video/}).click();await page.getByRole('link',{name:'Meta Ad Library',exact:true}).waitFor();checkMetaLink(await page.getByRole('link',{name:'Meta Ad Library',exact:true}).getAttribute('href'),'id','123');await page.getByRole('button',{name:'Save opportunity',exact:true}).click();await page.getByRole('button',{name:'Close creative details'}).click();
 await page.goto('http://127.0.0.1:3101/opportunities');await page.getByLabel('Workflow stage').first().selectOption('Briefing');await page.getByRole('heading',{name:/Briefing/}).waitFor();await page.screenshot({path:'/tmp/levr-boards-desktop.png',fullPage:true});
 await page.goto('http://127.0.0.1:3101/briefs');await page.getByLabel('Reference board').selectOption('inbox');await page.getByLabel('Target audience').fill('Business owners');await page.getByLabel('Your offer or client context').fill('Content strategy and growth operations');await page.getByLabel('Objective',{exact:true}).fill('Attract qualified conversations');await page.getByRole('button',{name:'Generate creative brief'}).click();await page.getByRole('heading',{name:'What the references show'}).waitFor();await page.locator('.adaptation .eyebrow').waitFor();
 await page.goto('http://127.0.0.1:3101/ask');await page.getByLabel('Ask your intelligence library').fill('Show me every ad running for more than 60 days.');await page.getByRole('button',{name:'Ask Levr',exact:true}).click();await page.locator('.chat-answer').waitFor();await page.locator('.inline-citation').first().click();await page.getByRole('dialog',{name:'Creative details'}).waitFor();await page.getByRole('button',{name:'Close creative details'}).click();
 await page.setViewportSize({width:390,height:844});
 for(const route of ['overview','paid','organic','competitors','opportunities','patterns','briefs','ask']){await page.goto(`http://127.0.0.1:3101/${route}`);await page.locator('.page-title').waitFor();if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw Error(`Mobile overflow: ${route}`);}
 await page.screenshot({path:'/tmp/levr-ask-mobile.png',fullPage:true});await page.getByRole('button',{name:'Open navigation'}).click();await page.locator('.sidebar.open').waitFor();await page.getByRole('link',{name:'Competitors',exact:true}).click();await page.getByRole('heading',{name:'Know who you’re watching.'}).waitFor();await page.waitForFunction(()=>getComputedStyle(document.querySelector('.sidebar')).visibility==='hidden');await page.screenshot({path:'/tmp/levr-competitors-mobile.png',fullPage:true});
+await checkReviewLinks();
 if(errors.length)throw Error('Browser JavaScript errors: '+errors.join('; '));
-console.log(JSON.stringify({ok:true,errors,checks:['eight routes desktop/mobile without overflow','login','ad and post save','stage move','brief generation','ask inline citation','9:16 Reels and Shorts','carousel slide navigation','mobile navigation']}));
+console.log(JSON.stringify({ok:true,errors,checks:['eight routes desktop/mobile without overflow','login','ad and post save','stage move','brief generation','ask inline citation','9:16 Reels and Shorts','carousel slide navigation','mobile navigation','Meta review links request all countries, all categories and active/inactive ads']}));
 } finally {await browser.close();server.close();db.close();}

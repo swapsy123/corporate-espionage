@@ -1,5 +1,7 @@
 # ScrapeCreators integration
 
+Meta review links open with all countries, all ad categories and active/inactive ads selected (`country=ALL`, `ad_type=all`, `active_status=all`). This applies to advertiser matches, profile review and saved ad links when opened in the dashboard. The manual collection request remains scoped to active ads across all countries; Meta controls historical ad availability on its own site.
+
 The server adapter uses the official public API contract distributed in `@scrapecreators/cli@1.0.87`, specifically its `api-config/apis.js`, `api-config/instagram-apis.js`, and transcript documentation. Package provenance: https://github.com/ScrapeCreators/scrapecreators-cli and https://www.npmjs.com/package/@scrapecreators/cli. No third-party wrapper is executed or installed as an application dependency. Source lookup used the npm registry because the onboarding machine's egress proxy denied access to the documentation site.
 
 Every request is server-side to `https://api.scrapecreators.com`, with the `x-api-key` header taken from the authorized workspace's encrypted credential. The original Levr workspace alone can use the `SCRAPECREATORS_API_KEY` environment fallback. Redirects are rejected, timeouts and response size limits are enforced, and upstream response bodies are never surfaced as errors. The browser's masked setup field submits a key once; saved keys are never returned to the browser. Deployments behind an HTTP proxy should run Node 24 with `NODE_USE_ENV_PROXY=1` or `--use-env-proxy` as appropriate to their platform.

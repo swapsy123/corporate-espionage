@@ -13,7 +13,8 @@ test('Meta active ads exhaust pagination, deduplicate by archive ID, preserve co
  const result=await collectProfile({platform:'meta',identifier:'367152833370567',confirmed:true},options(m.fetchImpl));
  assert.equal(result.items.length,2);assert.equal(result.complete,true);assert.equal(result.paginationExhausted,true);
  assert.equal(m.calls[0].options.method,'POST');assert.equal(m.calls[1].params.cursor,'page2');assert.equal(m.calls[0].params.status,'ACTIVE');
- assert.equal(result.items[0].sourceUrl,'https://www.facebook.com/ads/library/?id=1162496978867592');
+ assert.equal(result.items[0].sourceUrl,'https://www.facebook.com/ads/library/?id=1162496978867592&country=ALL&ad_type=all&active_status=all');
+ assert.equal(m.calls[0].params.country,'ALL');
  assert.equal(result.items[0].startDate,'2025-02-27T08:00:00.000Z');assert.equal(result.items[0].caption,'A sourced ad caption');
  assert.equal(result.items[0].views,null);assert.equal(result.items[0].transcript,null);
 });
@@ -94,6 +95,7 @@ test('Unconfirmed matches and non-platform URLs never trigger requests',async()=
 
 test('Meta company search returns candidates that still need confirmation',async()=>{
  const m=mock([{searchResults:[{page_id:'51212153078',name:'Candidate brand'}]}]);const r=await searchMetaCompanies('Candidate',options(m.fetchImpl));assert.equal(r[0].confirmed,false);assert.equal(r[0].identifier,'51212153078');assert.equal(m.calls[0].params.query,'Candidate');
+ assert.equal(r[0].sourceUrl,'https://www.facebook.com/ads/library/?view_all_page_id=51212153078&search_type=page&country=ALL&ad_type=all&active_status=all');
 });
 
 test('Unreported active state fails instead of silently deactivating stored ads',async()=>{

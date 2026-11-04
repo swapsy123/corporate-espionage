@@ -1,5 +1,12 @@
 # Local validation record
 
+## Meta review filters in the free app — 4 November 2026
+
+- All 103 automated tests, the production build and the desktop/mobile browser smoke pass. The browser checks cover Meta profile review, search-result review and an ad with a previously stored source URL.
+- Review links explicitly set `country=ALL`, `ad_type=all` and `active_status=all`, preserving the advertiser Page ID or individual ad ID. Meta profile review opens the advertiser's Ad Library page. Already stored source links are normalized at render time; no database rewrite or refresh is needed to correct their filters.
+- Collection still requests active ads across all countries. Review filters do not change that collection scope or guarantee Meta retains every historical ad. The external Meta interface was not accessed in these local checks; outbound URL parameters were verified using fixtures.
+- Render requires a manual deployment of the free app. Reopen review links from the refreshed app after deployment; an existing Meta tab retains its previous URL. The paid app is unchanged.
+
 ## Creative preview recovery — 4 November 2026
 
 - All 103 automated tests and the production client build pass. The existing eight-route desktop/mobile browser smoke and the new `npm run test:media:browser` regression pass. No schema or secret changes are required.
