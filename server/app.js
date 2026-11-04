@@ -16,6 +16,7 @@ import {createSocialSignup} from './social-signup.js';
 import {CONSENT_TEXT} from './signup-input.js';
 import {createAccountDeletion} from './account-deletion.js';
 import {registerAccountDeletion,registerMetaDeletion} from './account-deletion-routes.js';
+import {registerImageRoutes} from './media-images.js';
 import {findPatterns,generateBrief,askLibrary} from './intelligence.js';
 const text=z.string().trim().min(1).max(500);
 const stages=z.enum(['Saved','Briefing','Creating','Launched','Winner']);
@@ -60,6 +61,7 @@ export function createApp(options={}){
  a.registerManagementRoutes(app);
  leadDelivery.registerRoutes(app);
  registerAccountDeletion(app,{db:catalog,deletion,social:socialSignup,auth:a});
+ registerImageRoutes(app,{db,manager,fetchImage:options.fetchImage});
  app.use('/api',manager.middleware);
  app.get('/api/settings/provider',(req,res)=>res.json(vault.status(req.workspaceId)));
  app.put('/api/settings/provider',async(req,res)=>{const v=z.object({apiKey:z.string().trim().min(1).max(4096).regex(/^[\x21-\x7e]+$/,'Use an API key without spaces or line breaks.')}).parse(req.body);const account=await verifyProvider({apiKey:v.apiKey});if(!manager.canAccess(req))return res.status(410).json({error:'Workspace access has been removed.'});res.json({...vault.set(req.workspaceId,v.apiKey,{verifiedAt:now()}),currentCredits:account.creditCount});});

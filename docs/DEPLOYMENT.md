@@ -78,6 +78,8 @@ Clients cannot enumerate or select other clients' workspaces. The server checks 
 
 Record the actual deployment URL only after the provider confirms deployment. Verify owner and invited-client sign-in, unauthorized API rejection, attempts to access a different client's record, one live collection with each workspace's own provider key, saved references, invitation revocation, and persistence after a controlled restart. Local test fixtures do not establish live provider access.
 
+Creative previews use `/api/workspaces/:workspaceId/items/:itemId/image/:slot` for supported Instagram/Meta/YouTube media CDNs. It requires the existing session and workspace membership (or owner access), reads only a stored image URL, and validates redirect hosts and resolved addresses. Images are limited to 8 MiB, a 15-second timeout and eight concurrent relay downloads; no persistent media cache is created. The browser can fall back to another stored cover and displays recovery guidance when none loads. This update needs no new environment variables or migration. A manual competitor refresh may renew expired source links; opening an image never spends ScrapeCreators credits or schedules a refresh.
+
 ## Production build dependencies
 
 The blueprint explicitly includes development dependencies during the build. Vite is needed to compile the client even though the deployed service runs in production mode. A plain `npm ci` with `NODE_ENV=production` can omit Vite and fail with `vite: not found`. The build command must remain `npm ci --include=dev && npm run build`.

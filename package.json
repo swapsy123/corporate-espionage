@@ -15,7 +15,8 @@
     "db:migrate": "node server/migrate.js",
     "test:browser": "node scripts/browser-smoke.mjs",
     "test:signup:browser": "node scripts/browser-signup.mjs",
-    "test:deletion:browser": "node scripts/browser-account-deletion.mjs"
+    "test:deletion:browser": "node scripts/browser-account-deletion.mjs",
+    "test:media:browser": "node scripts/browser-media.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",

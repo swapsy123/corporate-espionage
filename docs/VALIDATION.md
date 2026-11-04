@@ -1,5 +1,13 @@
 # Local validation record
 
+## Creative preview recovery — 4 November 2026
+
+- All 103 automated tests and the production client build pass. The existing eight-route desktop/mobile browser smoke and the new `npm run test:media:browser` regression pass. No schema or secret changes are required.
+- Instagram/Meta/YouTube CDN images can load through an authenticated endpoint scoped to the item's workspace. Tests verify signed-out denial, cross-workspace denial, client and owner access, revocation during a request, stored-source selection and preservation of research after failures. The relay rejects unsupported hosts, credentials, redirects outside the CDN allowlist, private addresses, oversized downloads and non-image responses. Requests forward no browser cookies, provider keys or referrers.
+- Browser fixtures reproduce failed direct CDN requests and expired image URLs. Checks cover same-origin image delivery, alternate covers, clear unavailable states, manual retry, carousel slide navigation, saved opportunities, correct original links and 9:16 viewing. Desktop and 390/487px screenshots were inspected. No broken image elements, JavaScript errors or horizontal page overflow remained in the exercised cases.
+- These tests use synthetic images and mocked CDN responses. The reported live post could not be inspected from this environment. Already expired media may require a manual competitor refresh; unavailable original media cannot be guaranteed recoverable. No background ScrapeCreators requests or refreshes were added.
+- Render still requires manual deployment. The separate paid ARPRA repository is unchanged.
+
 ## Email/password only — 3 November 2026
 
 - All 97 automated tests and the production client build pass. Google/Facebook authentication and deletion reauthentication have been retired; old provider credentials cannot re-enable them. No new migration or deployment variable is required.
