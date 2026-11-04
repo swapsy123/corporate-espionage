@@ -1,5 +1,13 @@
 # Local validation record
 
+## Paid library gateway handling — 4 November 2026
+
+- The reported “The server returned an unexpected response” message comes from the client JSON-decoding fallback and hides the response status. A non-JSON 502 reproduces it locally; the actual production status and cause remain unverified because this environment's proxy denies the live Render connection.
+- Stored reads of `/api/items`, `/api/status` and `/api/competitors` now recover interrupted connections and non-JSON 502/503/504 responses with at most two additional attempts. Structured app errors are preserved without retrying. Refresh jobs, media renewal, provider-backed searches, signups and other mutations are never automatically repeated. Workspace changes stop queued retries and discard delayed responses.
+- Invalid success responses reject cleanly instead of flowing into the page as data. Library errors identify the failed request and HTTP status, preserve already loaded cards, display an unavailable count rather than a false zero, and provide a button that retries stored reads only.
+- All 116 automated tests and the production build pass. The focused browser regression simulates transient/persistent gateways, malformed HTTP 200 responses, independently failed status requests, retained cards after background failures and manual recovery. The eight-route desktop/mobile smoke and workspace browser workflow also pass, including delayed prior-workspace responses, password recovery and revoked sessions. A mobile error-state screenshot was inspected; no horizontal overflow or browser JavaScript errors occurred in those checks.
+- Commands: `npm test`, `npm run build`, `CHROMIUM_PATH=/usr/bin/chromium node scripts/browser-library-errors.mjs`, `CHROMIUM_PATH=/usr/bin/chromium node scripts/browser-smoke.mjs`. The browser fixtures start no scraping jobs or paid provider calls. The server/database schema, credentials and ARPRA are unchanged. A sustained live gateway still requires the diagnostic steps in `docs/LIVE_RETRIEVAL_CHECK.md`; no production fix is claimed from simulated responses.
+
 ## Retrieval follow-up — 4 November 2026
 
 - The user reports all Instagram previews unavailable and missing paid ads on the live free site. The live cause is not yet verified: this environment cannot inspect the signed-in Render service or use the workspace's provider key. See `docs/LIVE_RETRIEVAL_CHECK.md` for a browser-based diagnostic handoff.
