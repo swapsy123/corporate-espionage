@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" role="img" aria-label="Levr">
+  <title>Levr</title>
+  <rect width="32" height="32" fill="#fbfaf8"/>
+  <path d="M108 0V1490H378V226H1035V0Z" transform="translate(7 24) scale(.014 -.014)" fill="#121212"/>
+  <path d="M8.5 28H23.5" stroke="#b4442e" stroke-width="1.5"/>
+</svg>

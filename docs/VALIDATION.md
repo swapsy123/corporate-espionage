@@ -1,5 +1,12 @@
 # Local validation record
 
+## Levr thumbnail and icons — 8 November 2026
+
+- Added a static 1200×630 sharing thumbnail, an SVG browser icon, a 32px PNG fallback and a 180px Apple touch icon. They use the existing Inter Tight font and Levr paper/ink/rust tokens; no private workspace data appears in them. Assets were visually inspected.
+- Open Graph and large-image card metadata are available in the initial HTML, with an absolute image URL for the free Render service. The existing `noindex,nofollow` directive remains. Docker now includes `public` during the Vite build so the images are packaged there as well.
+- The production build passes. An isolated running server returned the expected metadata on `/`, `/signup` and `/paid`, served all four assets anonymously with correct media types/dimensions, and continued to return 401 for signed-out research API requests. Live social-crawler behavior has not been verified; Render needs manual deployment.
+- Regenerate images with `CHROMIUM_PATH=/usr/bin/chromium node scripts/generate-brand-assets.mjs`. If the free service moves domains, update the absolute sharing-image URLs in `index.html`. Versioned image filenames allow future artwork updates without reusing old cache keys.
+
 ## Password length — 8 November 2026
 
 - The free app now accepts passwords of 12–1024 characters, with a shared policy for signup, invitation acceptance, password reset and owner configuration. Existing passwords and hashes are retained. Sign-in no longer applies a password-creation minimum in the browser.
