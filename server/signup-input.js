@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PASSWORD_MAX_LENGTH } from '../shared/password-policy.js';
 
 export const CONSENT_VERSION = 'email-resources-and-offers-v1';
 export const CONSENT_TEXT = 'Email me useful resources and information about Levr’s paid services. I can unsubscribe at any time.';
@@ -18,7 +19,7 @@ export const signupInput = z.object({
   phone: optionalText(40).refine(value => !value || /^\+[1-9]\d{6,14}$/.test(value.replace(/[\s().-]/g,'')), 'Include the country code, for example +44 7700 900123.')
     .transform(value => value.replace(/[\s().-]/g,'')),
   marketingConsent: z.boolean().optional().default(false),
-  password: z.string().max(1024).optional(),
+  password: z.string().max(PASSWORD_MAX_LENGTH).optional(),
   // Honeypot: real forms leave this empty. Never include it in a lead payload.
   contactAddress: optionalText(200),
   attribution: z.object({

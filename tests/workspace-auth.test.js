@@ -6,8 +6,8 @@ import express from 'express';
 import {openDatabase} from '../server/db.js';
 import {auth,digest} from '../server/auth.js';
 
-async function fixture(t,{ownerConfigured=true,production=false}={}){
- const db=openDatabase(':memory:'),ownerPassword=randomBytes(24).toString('hex');
+async function fixture(t,{ownerConfigured=true,production=false,ownerPassword=randomBytes(24).toString('hex')}={}){
+ const db=openDatabase(':memory:');
  const a=auth(db,{password:ownerConfigured?ownerPassword:'',production,ownerEmail:'owner@example.com'});
  const app=express();app.use(express.json());
  app.post('/auth/login',a.login);app.post('/auth/accept-invite',a.acceptInvite);app.post('/auth/reset-password',a.resetPassword);app.post('/auth/logout',a.requireAuth,a.logout);
@@ -35,6 +35,20 @@ async function fixture(t,{ownerConfigured=true,production=false}={}){
  async function invite(workspace,email='client@example.com'){const result=await owner.request(`/api/workspaces/${workspace.id}/invites`,{method:'POST',body:{email}});assert.equal(result.status,201);return result.data;}
  return {db,a,owner,ownerPassword,session,workspace,invite};
 }
+
+test('12-character passwords work for the owner, invitations and resets; shorter passwords do not consume links',async t=>{
+ const s=await fixture(t,{ownerPassword:randomBytes(9).toString('base64url')}),w=await s.workspace(),client=s.session(),invite=await s.invite(w),password=randomBytes(9).toString('base64url');
+ assert.equal((await client.accept(invite,'client@example.com',password.slice(0,11))).status,400);
+ assert.equal(s.db.prepare('SELECT accepted_at FROM invites WHERE id=?').get(invite.id).accepted_at,null);
+ const accepted=await client.accept(invite,'client@example.com',password);assert.equal(accepted.status,200);
+ const reset=(await s.owner.request(`/api/workspaces/${w.id}/members/${accepted.data.user.id}/reset`,{method:'POST',body:{}})).data,newPassword=randomBytes(9).toString('base64url');
+ assert.equal((await s.session().reset(reset,'client@example.com',newPassword.slice(0,11))).status,400);
+ assert.equal((await client.request('/api/session')).status,200,'rejected reset preserves the current session');
+ assert.equal(s.db.prepare('SELECT accepted_at FROM invites WHERE id=?').get(reset.id).accepted_at,null);
+ assert.equal((await s.session().reset(reset,'client@example.com',newPassword)).status,200);
+ assert.equal((await client.request('/api/session')).status,401);
+ assert.equal((await s.session().login('client@example.com',newPassword)).status,200);
+});
 
 test('owner manages client workspaces; invite-only client receives only assigned workspace',async t=>{
  const s=await fixture(t);const clientWorkspace=await s.workspace('Client A'),otherWorkspace=await s.workspace('Client B');

@@ -1,5 +1,12 @@
 # Local validation record
 
+## Password length — 8 November 2026
+
+- The free app now accepts passwords of 12–1024 characters, with a shared policy for signup, invitation acceptance, password reset and owner configuration. Existing passwords and hashes are retained. Sign-in no longer applies a password-creation minimum in the browser.
+- New-password fields retain autofill support and expose a Safari-compatible `passwordrules` hint. Copy and current deployment/signup documentation use the same minimum. No password rotation, secret changes or database migration is needed.
+- All 118 automated tests and the production build pass. Boundary tests reject 11 characters, accept 12, verify login and confirm that rejected invitation/reset attempts preserve links and sessions. The existing longer-password authentication tests continue to pass.
+- Desktop/mobile signup and workspace browser workflows pass using randomly generated 12-character client passwords, including sign-in, invitations and password recovery. Chromium verifies the form hints; native Safari password generation was not exercised.
+
 ## Paid library gateway handling — 4 November 2026
 
 - The reported “The server returned an unexpected response” message comes from the client JSON-decoding fallback and hides the response status. A non-JSON 502 reproduces it locally; the actual production status and cause remain unverified because this environment's proxy denies the live Render connection.

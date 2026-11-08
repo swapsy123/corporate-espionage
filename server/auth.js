@@ -1,16 +1,16 @@
 import {randomBytes,randomUUID,createHash,scryptSync,timingSafeEqual} from 'node:crypto';
 import {signupInput,leadPayload} from './signup-input.js';
+import {validPassword,PASSWORD_MIN_LENGTH,PASSWORD_MAX_LENGTH} from '../shared/password-policy.js';
 export const digest = v=>createHash('sha256').update(v).digest('hex');
 const SESSION_AGE=12*60*60*1000;
 const INVITE_AGE=7*24*60*60*1000;
 const RESET_AGE=60*60*1000;
 const normalizeEmail=value=>typeof value==='string'?value.trim().toLowerCase():'';
 const validEmail=value=>value.length<=254&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-const validPassword=value=>typeof value==='string'&&value.length>=16&&value.length<=1024;
 const currentTime=()=>new Date().toISOString();
 function passwordHash(password){const salt=randomBytes(32).toString('hex');return `scrypt$${salt}$${scryptSync(password,salt,64).toString('hex')}`;}
 function passwordMatches(password,encoded){
- if(typeof password!=='string'||password.length>1024)return false;
+ if(typeof password!=='string'||password.length>PASSWORD_MAX_LENGTH)return false;
  const [algorithm,salt,expected]=String(encoded||'').split('$');
  if(algorithm!=='scrypt'||!/^[a-f0-9]{64}$/.test(salt||'')||!/^[a-f0-9]{128}$/.test(expected||''))return false;
  return timingSafeEqual(scryptSync(password,salt,64),Buffer.from(expected,'hex'));
@@ -57,7 +57,7 @@ export function auth(db,options={}){
   db.prepare('INSERT INTO signup_attempts VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET count=count+1').run(key,time+3600000);
   const fields=signupInput.parse(req.body);
   if(fields.contactAddress)return res.status(400).json({error:'Unable to complete signup. Reload and try again.'});
-  if(!validPassword(fields.password))return res.status(400).json({error:'Choose a password of at least 16 characters.'});
+  if(!validPassword(fields.password))return res.status(400).json({error:`Choose a password of at least ${PASSWORD_MIN_LENGTH} characters.`});
   const email=fields.email;
   if(email===ownerEmail||db.prepare('SELECT 1 FROM users WHERE email=?').get(email))
    return res.status(409).json({error:'This email already has an account. Sign in with its existing login method or ask Levr for a password reset.'});
@@ -82,7 +82,7 @@ export function auth(db,options={}){
  function login(req,res){
   const rate=rateLimit(req,res);if(!rate)return;
   const email=normalizeEmail(req.body?.email),input=req.body?.password;
-  if(email===ownerEmail&&!ownerHash)return res.status(503).json({error:'Owner access is not configured. Set LEVR_OWNER_PASSWORD to a unique password of at least 16 characters in secure environment settings.'});
+  if(email===ownerEmail&&!ownerHash)return res.status(503).json({error:`Owner access is not configured. Set LEVR_OWNER_PASSWORD to a unique password of at least ${PASSWORD_MIN_LENGTH} characters in secure environment settings.`});
   const row=email===ownerEmail?null:db.prepare('SELECT * FROM users WHERE email=?').get(email);
   const encoded=email===ownerEmail?ownerHash:row?.password_hash||dummyHash;
   const matches=passwordMatches(input,encoded);

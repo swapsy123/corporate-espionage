@@ -10,7 +10,7 @@ import {chromium} from '@playwright/test';
 import {createApp} from '../server/app.js';
 import {openDatabase} from '../server/db.js';
 const dir=mkdtempSync(join(tmpdir(),'levr-signup-browser-')),db=openDatabase(join(dir,'catalog.sqlite'));
-const password=randomBytes(24).toString('hex'),clientPassword=randomBytes(24).toString('hex');
+const password=randomBytes(24).toString('hex'),clientPassword=randomBytes(9).toString('base64url');
 const outer=express(),server=outer.listen(0,'127.0.0.1');await once(server,'listening');const base=`http://127.0.0.1:${server.address().port}`;
 let deliveryStatus=500;const deliveries=[];
 const app=createApp({db,seed:false,password,production:false,secretDirectory:join(dir,'secrets'),secretEncryptionKey:randomBytes(32).toString('hex'),
@@ -27,6 +27,7 @@ try{
  await client.goto(base+'/?'+new URLSearchParams(campaign));await client.getByRole('button',{name:'Create a free workspace'}).click();await client.getByRole('heading',{name:'Find your next idea.'}).waitFor();
  assert.equal(await client.getByRole('button',{name:/Continue with Google|Continue with Facebook/}).count(),0);
  assert.equal(await client.getByRole('checkbox').isChecked(),false);
+ assert.equal(await client.locator('input[name="password"]').getAttribute('minlength'),'12');assert.match(await client.locator('input[name="password"]').getAttribute('passwordrules'),/minlength: 12;/);
  await client.screenshot({path:join(screenshotDir,'desktop.png'),fullPage:true});
  await client.locator('input[name="fullName"]').fill('Lead Test');await client.locator('input[name="email"]').fill('lead.test@gmail.com');await client.locator('input[name="companyName"]').fill('Test company');
  await client.locator('input[name="password"]').fill(clientPassword);await client.locator('input[name="confirmation"]').fill(clientPassword);

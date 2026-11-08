@@ -31,6 +31,15 @@ async function fixture(t,options={}){
  const owner=actor();await owner.request('/auth/login',{method:'POST',body:{email:'owner@example.test',password:ownerPassword}});
  return{db,app,base,actor,owner,deliveryCalls,socialCalls,setDeliveryStatus:v=>deliveryStatus=v};
 }
+test('Signup accepts a 12-character password, rejects 11 characters and permits subsequent login',async t=>{
+ const s=await fixture(t),client=s.actor(),password=randomBytes(9).toString('base64url'),input={...fields(),password};
+ assert.equal(password.length,12);
+ const rejected=await client.signup({...input,password:password.slice(0,11)});assert.equal(rejected.status,400);assert.match(rejected.data.error,/at least 12 characters/);
+ assert.equal(s.db.prepare('SELECT count(*) n FROM users').get().n,0);assert.equal(s.deliveryCalls.length,0);
+ assert.equal((await client.signup(input)).status,201);
+ assert.equal((await client.request('/auth/logout',{method:'POST',body:{}})).status,200);
+ assert.equal((await client.request('/auth/login',{method:'POST',body:{email:input.email,password}})).status,200);
+});
 test('Public signup grants only its own workspace and sends allowed lead fields without a password',async t=>{
  const s=await fixture(t),client=s.actor(),input=fields();input.attribution={utm_source:'instagram',utm_medium:'paid_social',utm_campaign:'free-library',utm_content:'carousel-1',utm_term:'growth operators',access_token:'must-not-be-forwarded'};
  const r=await client.signup({...input,role:'owner',workspaceId:'levr'});assert.equal(r.status,201);assert.equal(r.data.user.role,'client');assert.equal(r.data.workspaces.length,1);assert.notEqual(r.data.defaultWorkspaceId,'levr');

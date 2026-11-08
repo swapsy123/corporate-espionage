@@ -9,7 +9,7 @@ import {chromium} from '@playwright/test';
 import {createApp} from '../server/app.js';
 import {openDatabase} from '../server/db.js';
 const secretDirectory=mkdtempSync(join(tmpdir(),'levr-ui-vault-'));
-const db=openDatabase(':memory:'),password=randomBytes(24).toString('hex'),clientPassword=randomBytes(24).toString('hex');
+const db=openDatabase(':memory:'),password=randomBytes(24).toString('hex'),clientPassword=randomBytes(9).toString('base64url');
 const created=createApp({db,seed:false,password,production:false,secretDirectory,secretEncryptionKey:randomBytes(32).toString('hex'),verifyProvider:async({apiKey})=>{if(apiKey==='invalid-browser-key')throw new Error('Synthetic rejection');return {creditCount:100};}});
 db.prepare('INSERT INTO competitors(id,name) VALUES (?,?)').run('owner-record','Levr private competitor');
 const server=created.app.listen(0,'127.0.0.1');await once(server,'listening');
@@ -66,7 +66,7 @@ try {
  const resetUrl=await owner.getByLabel('Private password reset link',{exact:true}).inputValue();assert.ok(resetUrl.startsWith(base+'/reset#token='));await owner.getByRole('button',{name:'Close dialog',exact:true}).click();
  const recovered=await browser.newPage({viewport:{width:390,height:844}});recovered.on('pageerror',e=>errors.push(e.message));
  await recovered.goto(resetUrl);await recovered.getByRole('heading',{name:'Choose a new password.',exact:true}).waitFor();assert.equal(new URL(recovered.url()).hash,'');
- const resetPassword=randomBytes(24).toString('hex');await recovered.getByLabel('Account email address', {exact:true}).fill('alpha@example.test');await recovered.getByLabel('New password',{exact:true}).fill(resetPassword);await recovered.getByLabel('Confirm password',{exact:true}).fill(resetPassword);await recovered.getByRole('button',{name:'Save new password',exact:true}).click();await recovered.getByRole('heading',{name:'Your market, in focus.',exact:true}).waitFor();
+ const resetPassword=randomBytes(9).toString('base64url');await recovered.getByLabel('Account email address', {exact:true}).fill('alpha@example.test');await recovered.getByLabel('New password',{exact:true}).fill(resetPassword);await recovered.getByLabel('Confirm password',{exact:true}).fill(resetPassword);await recovered.getByRole('button',{name:'Save new password',exact:true}).click();await recovered.getByRole('heading',{name:'Your market, in focus.',exact:true}).waitFor();
  await client.getByRole('button',{name:'Add competitor',exact:true}).click();await client.getByLabel('Competitor name',{exact:true}).fill('Old session must not save');await client.getByRole('button',{name:'Save competitor',exact:true}).click();await client.getByRole('heading',{name:'Welcome back.',exact:true}).waitFor();
  await recovered.goto(base+'/competitors');await recovered.getByRole('heading',{name:'Alpha private competitor',exact:true}).waitFor();
  await owner.getByRole('button',{name:'Remove access',exact:true}).click();await owner.getByRole('button',{name:'Revoke access',exact:true}).click();

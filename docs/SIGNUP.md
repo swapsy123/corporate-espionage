@@ -1,6 +1,6 @@
 # Free signup and GoHighLevel lead capture
 
-The free app's public form is `/signup`. Email/password registration immediately creates a separate client workspace and opens Workspace settings for ScrapeCreators setup. Personal email addresses are accepted; work email is suggested. Required: full name, email, company name and a password of at least 16 characters. Website and international phone number are optional. The email marketing checkbox is optional and unchecked.
+The free app's public form is `/signup`. Email/password registration immediately creates a separate client workspace and opens Workspace settings for ScrapeCreators setup. Personal email addresses are accepted; work email is suggested. Required: full name, email, company name and a password of at least 12 characters. Website and international phone number are optional. The email marketing checkbox is optional and unchecked.
 
 Signup and sign-in now use **email and password only**. Google and Facebook login have been removed; do not create developer apps or configure OAuth credentials for this launch. Existing account data and historical provider links are preserved. The separate paid ARPRA application retains its invitation flow.
 

@@ -1,4 +1,5 @@
 import React,{useState} from 'react';
+import {PASSWORD_MIN_LENGTH,PASSWORD_MAX_LENGTH,PASSWORD_RULES} from '../shared/password-policy.js';
 import {captureSignupAttribution,clearSignupAttribution} from './signup-attribution.js';
 
 export default function Signup({api,config,onLogin,onSignIn}) {
@@ -29,7 +30,7 @@ export default function Signup({api,config,onLogin,onSignIn}) {
       <label className="field">Company name<input name="companyName" autoComplete="organization" required maxLength={160}/></label>
       <label className="field">Website <span className="caption">Optional</span><input name="website" type="text" inputMode="url" autoComplete="url" maxLength={500} placeholder="example.com"/></label>
       <label className="field signup-full-width">Phone number <span className="caption">Optional</span><input name="phone" type="tel" autoComplete="tel" maxLength={40} placeholder="+44 7700 900123"/><span className="caption">Include your country code.</span></label>
-      <label className="field">Password<input name="password" type="password" autoComplete="new-password" required minLength={16} maxLength={1024}/><span className="caption">At least 16 characters.</span></label><label className="field">Confirm password<input name="confirmation" type="password" autoComplete="new-password" required minLength={16} maxLength={1024}/></label>
+      <label className="field">Password<input name="password" type="password" autoComplete="new-password" passwordrules={PASSWORD_RULES} required minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH}/><span className="caption">At least {PASSWORD_MIN_LENGTH} characters.</span></label><label className="field">Confirm password<input name="confirmation" type="password" autoComplete="new-password" required minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH}/></label>
      </div>
      <div className="signup-honeypot" aria-hidden="true"><label>Leave this empty<input name="contactAddress" tabIndex={-1} autoComplete="off"/></label></div>
      <label className="signup-consent"><input type="checkbox" name="marketingConsent"/><span>{config.consentText}</span></label>
