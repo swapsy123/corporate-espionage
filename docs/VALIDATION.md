@@ -1,3 +1,11 @@
+# Media playback and diagnostic validation — 9 November 2026
+
+- Production build passed; 130 Node tests passed, including cache/range behavior, concurrency, manual repairs, source preservation, scoped diagnostics and account deletion with cached media.
+- `npm run test:media:browser` passed: relayed images, fallback/retry, carousel order, source links, saved opportunities, media renewal and desktop/mobile layout.
+- `npm run test:playback:browser` passed with generated PNG/MP4 files: real video play/seek, single/batch repair, cached playback after simulated CDN expiry, carousel pixels, YouTube iframe referrer, safe media checks and mobile layout. Requires ffmpeg and Chromium.
+- `CHROMIUM_PATH=/usr/bin/chromium npm run test:browser` passed all eight desktop/mobile research routes and their save/brief/citation workflows.
+- No production account, provider key or customer database was used. Real production CDN access remains unverified. Deploy and use the in-app Check media report on an affected item if playback remains unavailable.
+
 # Local validation record
 
 ## Levr thumbnail and icons — 8 November 2026

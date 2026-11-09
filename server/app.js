@@ -17,7 +17,9 @@ import {createSocialSignup} from './social-signup.js';
 import {CONSENT_TEXT} from './signup-input.js';
 import {createAccountDeletion} from './account-deletion.js';
 import {registerAccountDeletion,registerMetaDeletion} from './account-deletion-routes.js';
-import {registerImageRoutes} from './media-images.js';
+import {registerImageRoutes,fetchCdnImage} from './media-images.js';
+import {registerVideoRoutes,openCdnVideo} from './media-video.js';
+import {createMediaCache} from './media-cache.js';
 import {registerMediaRefresh} from './media-refresh.js';
 import {findPatterns,generateBrief,askLibrary} from './intelligence.js';
 const text=z.string().trim().min(1).max(500);
@@ -39,12 +41,13 @@ function normalizeIdentifier(platform,raw){
 export function createApp(options={}){
  const catalog=options.db||openDatabase();if(options.seed!==false)seedCompetitors(catalog);
  const manager=createWorkspaceManager(catalog,{directory:options.workspaceDirectory}),db=manager.db;
+ const mediaCache=createMediaCache({directory:options.mediaCacheDirectory||manager.mediaCacheDirectory});
  const vault=options.vault||createSecretVault({directory:options.secretDirectory||manager.secretDirectory||join(tmpdir(),`levr-test-secrets-${id()}`),masterKey:options.secretEncryptionKey,ownerKey:options.providerKey});
  const signupEnabled=options.signupEnabled??process.env.LEVR_PUBLIC_SIGNUP!=='0';
  const leadDelivery=createLeadDelivery(catalog,options.leadDeliveryOptions);
  const socialSignup=createSocialSignup(catalog,{production:options.production,signupEnabled,...options.socialSignupOptions});
  const app=express(),a=auth(catalog,{...options,signupEnabled,leadDelivery,socialSignup}),collector=options.collector||collectProfile,verifyProvider=options.verifyProvider||verifyProviderAccount;
- const deletion=createAccountDeletion(catalog,{manager,vault,leadDelivery,ownerEmail:a.ownerEmail,logger:options.deletionLogger});
+ const deletion=createAccountDeletion(catalog,{manager,vault,mediaCache,leadDelivery,ownerEmail:a.ownerEmail,logger:options.deletionLogger});
  app.disable('x-powered-by');if(process.env.TRUST_PROXY==='1')app.set('trust proxy',1);
  app.use(helmet({contentSecurityPolicy:{directives:{defaultSrc:["'self'"],scriptSrc:["'self'"],styleSrc:["'self'","'unsafe-inline'"],fontSrc:["'self'"],imgSrc:["'self'",'https:','data:'],mediaSrc:["'self'",'https:','blob:'],connectSrc:["'self'"],frameSrc:['https://www.youtube-nocookie.com','https://www.youtube.com'],upgradeInsecureRequests:process.env.NODE_ENV==='production'?[]:null}},crossOriginEmbedderPolicy:false}));
  app.use(express.json({limit:'100kb'}));
@@ -62,9 +65,10 @@ export function createApp(options={}){
  a.registerManagementRoutes(app);
  leadDelivery.registerRoutes(app);
  registerAccountDeletion(app,{db:catalog,deletion,social:socialSignup,auth:a});
- registerImageRoutes(app,{db,manager,fetchImage:options.fetchImage});
+ registerImageRoutes(app,{db,manager,fetchImage:options.fetchImage,cache:mediaCache});
+ registerVideoRoutes(app,{db,manager,openVideo:options.openVideo,cache:mediaCache});
  app.use('/api',manager.middleware);
- registerMediaRefresh(app,{db,manager,vault,refreshMedia:options.refreshMedia});
+ const mediaRefresh=registerMediaRefresh(app,{db,manager,vault,refreshMedia:options.refreshMedia,warmMedia:mediaCache?(req,item)=>mediaCache.warm(req.workspaceId,`items:${item.id}`,item,{fetchImage:options.fetchImage||fetchCdnImage,openVideo:options.openVideo||openCdnVideo,allowed:()=>manager.canAccess(req)}):undefined});
  app.get('/api/settings/provider',(req,res)=>res.json(vault.status(req.workspaceId)));
  app.put('/api/settings/provider',async(req,res)=>{const v=z.object({apiKey:z.string().trim().min(1).max(4096).regex(/^[\x21-\x7e]+$/,'Use an API key without spaces or line breaks.')}).parse(req.body);const account=await verifyProvider({apiKey:v.apiKey});if(!manager.canAccess(req))return res.status(410).json({error:'Workspace access has been removed.'});res.json({...vault.set(req.workspaceId,v.apiKey,{verifiedAt:now()}),currentCredits:account.creditCount});});
  app.post('/api/settings/provider/verify',async(req,res)=>{const apiKey=vault.get(req.workspaceId);if(!apiKey)return res.status(400).json({error:'Add this workspace’s ScrapeCreators API key before checking the connection.'});const account=await verifyProvider({apiKey});if(!manager.canAccess(req))return res.status(410).json({error:'Workspace access has been removed.'});res.json({...vault.markVerified(req.workspaceId,apiKey),currentCredits:account.creditCount});});
@@ -133,5 +137,5 @@ export function createApp(options={}){
  app.use('/api',(req,res)=>res.status(404).json({error:'Endpoint not found.'}));
  const dist=resolve('dist');if(existsSync(dist)){app.use(express.static(dist,{index:false}));app.get('/{*path}',(req,res)=>res.sendFile(resolve(dist,'index.html')));}
  app.use((err,req,res,next)=>{if(res.headersSent)return next(err);if(err.name==='AccountDeletionError')return res.status(err.status).json({error:err.safeMessage});if(err.name==='ProviderConnectionError')return res.status(err.status||502).json({error:err.safeMessage});if(err.name==='SecretVaultError')return res.status(503).json({error:err.safeMessage||'Workspace credential storage is unavailable. Contact Levr.'});if(err instanceof z.ZodError)return res.status(400).json({error:err.issues.map(x=>`${x.path.join('.')}: ${x.message}`).join('; ')});if(err.code?.startsWith('ERR_SQLITE'))return res.status(409).json({error:'This record conflicts with an existing record or a required reference is missing.'});if(err.type==='entity.parse.failed')return res.status(400).json({error:'Request must contain valid JSON.'});res.status(500).json({error:'The operation could not be completed. Previously saved data is preserved.'});});
- return {app,db:catalog,deleteAccount:deletion.deleteAccount,retryAccountCleanup:deletion.retryCleanup,closeWorkspaceDatabases:()=>manager.close(),waitForRefresh:()=>Promise.all([...queues.values()]),waitForLeadDelivery:()=>leadDelivery.wait()};
+ return {app,db:catalog,deleteAccount:deletion.deleteAccount,retryAccountCleanup:deletion.retryCleanup,closeWorkspaceDatabases:()=>manager.close(),waitForRefresh:()=>Promise.all([...queues.values(),mediaRefresh.wait(),mediaCache?.wait()]),waitForLeadDelivery:()=>leadDelivery.wait()};
 }

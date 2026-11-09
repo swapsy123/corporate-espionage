@@ -47,7 +47,7 @@ try{
  assert.equal(await bad.locator('img').count(),0,'failed images are removed rather than showing broken-image icons');
  await page.screenshot({path:directory+'/desktop.png',fullPage:true});
 
- await bad.click();await page.getByText('Creative unavailable here.',{exact:true}).waitFor();
+ await bad.click();await page.locator('.media-viewer').getByText('Preview unavailable',{exact:true}).waitFor();
  const original=page.getByRole('link',{name:'View original',exact:true});assert.equal(await original.getAttribute('href'),'https://www.instagram.com/p/expired/');
  assert.equal(await page.getByText('Research text remains available when media expires.',{exact:true}).count(),1);
  const rect=await page.locator('.media-viewer').boundingBox();assert.ok(Math.abs(rect.width/rect.height-9/16)<.01);
@@ -57,9 +57,9 @@ try{
  await page.getByRole('tab',{name:'Instagram carousels'}).click();const carousel=page.getByRole('button',{name:/Preview fixture carousel/});await carousel.locator('img').waitFor();
  await page.waitForFunction(()=>document.querySelector('.creative-card img')?.naturalWidth>0);
  assert.match(await carousel.locator('img').getAttribute('src'),/slide-1$/,'card tries another available slide when its cover expires');
- await carousel.click();await page.getByText('Slide 1 of 2').waitFor();await page.getByText('Creative unavailable here.',{exact:true}).waitFor();
+ await carousel.click();await page.getByText('Slide 1 of 2').waitFor();await page.locator('.media-viewer').getByText('Preview unavailable',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Next slide'}).click();await page.getByText('Slide 2 of 2').waitFor();await page.waitForFunction(()=>document.querySelector('.media-viewer img')?.naturalWidth>0);
- await page.getByRole('button',{name:'Previous slide'}).click();await page.getByText('Creative unavailable here.',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Previous slide'}).click();await page.locator('.media-viewer').getByText('Preview unavailable',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Save opportunity',exact:true}).click();await page.getByRole('button',{name:'Close creative details'}).click();
  await page.goto(base+'/opportunities');await page.waitForFunction(()=>document.querySelector('.opportunity-title img')?.naturalWidth>0);
 
@@ -68,11 +68,11 @@ try{
   await page.waitForFunction(()=>document.querySelector('.creative-card img')?.naturalWidth>0);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await good.screenshot({path:`${directory}/working-${width}.png`});await bad.screenshot({path:`${directory}/unavailable-${width}.png`});
-  await bad.click();await page.getByText('Creative unavailable here.',{exact:true}).waitFor();
+  await bad.click();await page.locator('.media-viewer').getByText('Preview unavailable',{exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>[...document.querySelectorAll('.detail-panel img')].some(img=>img.complete&&!img.naturalWidth)),false);
   await page.screenshot({path:`${directory}/detail-${width}.png`,fullPage:true});await page.getByRole('button',{name:'Close creative details'}).click();
  }
- await bad.click();await page.getByText('Creative unavailable here.',{exact:true}).waitFor();
+ await bad.click();await page.locator('.media-viewer').getByText('Preview unavailable',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Refresh media links',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('.media-viewer img')?.naturalWidth>0);
  assert.deepEqual(renewed,['expired']);assert.ok(calls.some(url=>url.includes('/fresh.jpg')),'fresh provider links are used by the image relay');

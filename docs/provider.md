@@ -57,3 +57,21 @@ Fifteen provider tests exercise official response shapes with isolated fixtures:
 Live collection is blocked until the owner supplies `SCRAPECREATORS_API_KEY` securely and the environment permits `api.scrapecreators.com`. The current onboarding machine returned proxy `403 CONNECT` responses for the API and docs domains. Retry after configuration is applied. Never put the API key in chat or commit it.
 
 Current onboarding connectivity check: the API endpoint is reachable through the managed proxy with `NODE_USE_ENV_PROXY=1`; it returns HTTP 401 without credentials. Authenticated live collection is still unverified because `SCRAPECREATORS_API_KEY` has not been supplied.
+
+## Private media playback and manual repair — 9 November 2026
+
+The free app now includes the authenticated video relay and queued image relay. It streams byte ranges for playback/seeking and retains complete media copies privately beside the persistent SQLite database. Cache hits still require workspace access. Stored source URLs, allowed CDN hosts, public DNS addresses and redirects are validated; no credentials are forwarded to media hosts.
+
+**Repair failed previews** / **Refresh media for N posts** manually renews up to 50 Instagram posts, using the selected workspace's ScrapeCreators credits. Successful renewals preserve captions, transcripts, metrics and opportunities; failed renewals preserve previous creative data. Progress and per-post failures are visible and refresh history records each attempt. There is no cron or automatic paid-provider request on page load.
+
+The free app cache is limited to 128 MiB per workspace and 384 MiB total (the Render blueprint provisions a 1 GB disk). Images are capped at 8 MiB; complete video copies at 128 MiB. This is an evictable cache, not a permanent archive. Manual renewal remains necessary when an uncached source expires. Account deletion removes cached copies for exclusively owned workspaces and prevents pending writes from restoring them; shared workspace media remains private to its members.
+
+No new database migration, API key or hosting service is required. Render's blueprint has `autoDeploy: false`: deploy the latest main commit manually.
+
+## Media diagnostics — 9 November 2026
+
+Creative details now offer **Check media**, then **Copy media check**. This uses the same authenticated workspace-scoped image/video routes as the viewer, with a diagnostic query flag. Image checks validate bytes; video checks request the initial byte range and close the stream after bytes arrive. No ScrapeCreators calls or automatic source refresh occur. The check identifies upstream denial/missing/rate limiting, unsupported MIME types, DNS failures, timeouts, missing stored media and browser playback state. Reports include a revision marker and deployment commit when supplied by the host. They omit signed URLs, response bodies, cookies, keys and raw errors. Invalid/foreign workspace access cannot initiate a download.
+
+YouTube embeds explicitly send an origin referrer using `strict-origin-when-cross-origin`; the rest of the app keeps its existing referrer policy. This addresses YouTube's identification requirement, but embedding can still be disabled by the original creator.
+
+Live source playback remains unverified: this execution environment cannot reach the hosted app through its outbound proxy or access owner sessions/hosting logs. Browser tests use actual generated PNG/MP4 bytes and a simulated CDN; they do not establish that a particular production provider response is accessible. After deploying, open one affected creative, run **Check media**, and copy the report if playback still fails. Do not send API keys or signed source URLs.

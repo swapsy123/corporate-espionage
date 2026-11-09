@@ -54,5 +54,5 @@ export function createWorkspaceManager(catalog,{directory}={}) {
    unlinkSync(path);
   }
  }
- return {db:facade,middleware,isActive,canAccess,deleteFiles,run:(connection,workspaceId,callback)=>context.run({database:connection,workspaceId},callback),close(){for(const connection of connections.values())connection.close();connections.clear();},secretDirectory:rootFile?join(dirname(rootFile),'secrets'):null};
+ return {db:facade,middleware,isActive,canAccess,deleteFiles,run:(connection,workspaceId,callback)=>context.run({database:connection,workspaceId},callback),close(){for(const connection of connections.values())connection.close();connections.clear();},mediaCacheDirectory:rootFile?join(dirname(rootFile),'media-cache'):null,secretDirectory:rootFile?join(dirname(rootFile),'secrets'):null};
 }

@@ -7,7 +7,7 @@ const reasons={owner_request:'owner',self_service:'client',meta_request:'meta',s
 export class AccountDeletionError extends Error{
  constructor(message,status=400){super(message);this.name='AccountDeletionError';this.status=status;this.safeMessage=message}
 }
-export function createAccountDeletion(db,{manager,vault,leadDelivery,ownerEmail=process.env.OWNER_EMAIL||'fraser@wearelevr.com',logger=console}={}){
+export function createAccountDeletion(db,{manager,vault,mediaCache,leadDelivery,ownerEmail=process.env.OWNER_EMAIL||'fraser@wearelevr.com',logger=console}={}){
  // Clear deleted payloads from database pages as SQLite frees them. Hosting
  // snapshots/backups are separate and must follow the operator's retention policy.
  db.exec('PRAGMA secure_delete=ON');
@@ -39,6 +39,7 @@ export function createAccountDeletion(db,{manager,vault,leadDelivery,ownerEmail=
    try{
     if(manager.isActive(task.workspace_id))throw new Error('Workspace still exists.');
     // Close cached SQLite handles before unlinking the database and its sidecars.
+    mediaCache?.deleteWorkspace(task.workspace_id);
     manager.deleteFiles(task.workspace_id);
     vault.delete(task.workspace_id);
     db.prepare('UPDATE account_deletion_files SET completed_at=?,last_error=NULL WHERE deletion_id=? AND workspace_id=?').run(now(),deletionId,task.workspace_id);

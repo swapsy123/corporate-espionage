@@ -1,3 +1,4 @@
+import {createMediaCache} from '../server/media-cache.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash,createHmac,randomBytes,randomUUID} from 'node:crypto';
@@ -51,6 +52,8 @@ async function fixture(t,overrides={}){
 
 test('owner deletion removes the full account cascade, exclusive research files and keys, without touching other clients or the owner',async t=>{
  const s=await fixture(t),client=await s.signup(),other=await s.signup('other@example.test');await s.research(client);await s.research(other);
+ const cache=createMediaCache({directory:join(s.dir,'media-cache')}),cdn='https://scontent.test.fbcdn.net/test.png';
+ for(const workspace of [client.workspaceId,other.workspaceId])await cache.putImage(workspace,'items:test','thumbnail',cdn,{type:'image/png',body:Buffer.from('fixture')});
  const temporary=join(s.dir,'secrets',`${client.workspaceId}.${'a'.repeat(24)}.tmp`);copyFileSync(join(s.dir,'secrets',client.workspaceId+'.json'),temporary);
  const otherTemporary=join(s.dir,'secrets',`${other.workspaceId}.${'b'.repeat(24)}.tmp`);copyFileSync(join(s.dir,'secrets',other.workspaceId+'.json'),otherTemporary);
  s.actualVault.set('levr',randomBytes(24).toString('hex'));
@@ -73,6 +76,8 @@ test('owner deletion removes the full account cascade, exclusive research files 
  assert.equal(s.db.prepare('SELECT count(*) n FROM invites').get().n,0);
  for(const suffix of ['','-wal','-shm','-journal'])assert.equal(existsSync(join(s.dir,'workspaces',client.workspaceId+'.sqlite'+suffix)),false);
  assert.equal(existsSync(join(s.dir,'secrets',client.workspaceId+'.json')),false);
+ assert.equal(await cache.getImage(client.workspaceId,'items:test','thumbnail',cdn),null);
+ assert.ok(await cache.getImage(other.workspaceId,'items:test','thumbnail',cdn));
  assert.equal(existsSync(temporary),false);assert.equal(existsSync(otherTemporary),true);
  assert.ok(existsSync(join(s.dir,'workspaces',other.workspaceId+'.sqlite')));assert.ok(existsSync(join(s.dir,'secrets','levr.json')));
  assert.equal((await other.actor.request('/api/competitors')).data.length,1);assert.equal((await s.owner.request('/api/session')).data.user.role,'owner');

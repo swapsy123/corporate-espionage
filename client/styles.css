@@ -30,3 +30,7 @@
 .media-refresh-controls>.caption{margin:12px 0;max-width:520px}
 .media-refresh-controls .error-banner{margin:16px 0 0}
 .media-refresh-controls .button{white-space:normal}
+
+.media-repair{border:1px solid var(--line);padding:16px;margin:20px 0}.media-repair .row-actions{align-items:center;flex-wrap:wrap;gap:16px}.media-repair .caption{margin:0;max-width:600px}.media-repair p[role=status]{margin:12px 0 0;font-size:14px}.media-repair summary{cursor:pointer}.media-repair .button{white-space:normal}
+
+.media-diagnostics{margin:24px 0;border-top:1px solid var(--line);padding-top:16px}.media-diagnostics p{font-size:14px}.media-diagnostics pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}.media-diagnostics summary{cursor:pointer;margin-top:12px}

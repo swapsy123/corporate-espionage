@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {once,EventEmitter} from 'node:events';
 import {Readable} from 'node:stream';
+import {videoRange,openCdnVideo} from '../server/media-video.js';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
 import {randomBytes} from 'node:crypto';
 import {imageCandidates,mediaImageUrl} from '../shared/media-images.js';
 import {fetchCdnImage,imageLookup} from '../server/media-images.js';
@@ -47,9 +51,9 @@ test('Relay validates image bytes, caps downloads and revalidates redirects with
  await assert.rejects(fetchCdnImage(cdn,{request:transport(Array.from({length:4},()=>({status:302,headers:{location:cdn}})))}));
 });
 
-async function fixture(t){
- const db=openDatabase(':memory:'),password=randomBytes(24).toString('hex'),state={calls:[],fail:false,gate:null,mediaCalls:[],mediaFail:false,mediaGate:null,keys:new Map()};
- const app=createApp({db,seed:false,password,production:false,vault:{get:workspace=>workspace==='levr'?'owner-test-key':state.keys.get(workspace),status:workspace=>({configured:workspace==='levr'||state.keys.has(workspace)})},refreshMedia:async(item,{apiKey})=>{state.mediaCalls.push({item,apiKey});if(state.mediaGate)await state.mediaGate;if(state.mediaFail)throw Object.assign(Error('Private upstream detail'),{safeMessage:'Instagram media is unavailable. Existing media was preserved.'});return {thumbnail:'https://scontent.test.cdninstagram.com/fresh.jpg',media:[{type:'image',url:'https://scontent.test.cdninstagram.com/fresh.jpg'}]}},collector:async()=>({items:[{externalId:'client-post',kind:'organic',format:'instagram_image',thumbnail:cdn,media:[{type:'image',url:cdn}]}],complete:true}),fetchImage:async(target)=>{state.calls.push(target);if(state.gate)await state.gate;if(state.fail)throw Error('Private remote URL must not leak');return {type:'image/png',body:png}}});
+async function fixture(t,options={}){
+ const db=openDatabase(':memory:'),password=randomBytes(24).toString('hex'),state={calls:[],fail:false,gate:null,mediaCalls:[],mediaFail:false,mediaFailures:new Set(),mediaGate:null,keys:new Map(),videoCalls:[],videoGate:null};
+ const app=createApp({mediaCacheDirectory:options.mediaCacheDirectory,db,seed:false,password,production:false,vault:{get:workspace=>workspace==='levr'?'owner-test-key':state.keys.get(workspace),status:workspace=>({configured:workspace==='levr'||state.keys.has(workspace)})},refreshMedia:async(item,{apiKey})=>{state.mediaCalls.push({item,apiKey});if(state.mediaGate)await state.mediaGate;if(state.mediaFail||state.mediaFailures.has(item.externalId))throw Object.assign(Error('Private upstream detail'),{safeMessage:'Instagram media is unavailable. Existing media was preserved.'});return {thumbnail:'https://scontent.test.cdninstagram.com/fresh.jpg',media:[{type:'image',url:'https://scontent.test.cdninstagram.com/fresh.jpg'}]}},openVideo:async(target,options)=>{state.videoCalls.push({target,...options});if(state.videoFail)throw Error('Upstream expired');if(state.videoGate)await state.videoGate;return {status:options.range?206:200,headers:{'Content-Type':'video/mp4','Content-Length':'3',...(options.range?{'Content-Range':'bytes 2-4/10'}:{})},stream:Readable.from([Buffer.from('abc')])}},collector:async()=>({items:[{externalId:'client-post',kind:'organic',format:'instagram_image',thumbnail:cdn,media:[{type:'image',url:cdn}]}],complete:true}),fetchImage:async(target)=>{state.calls.push(target);if(state.gate)await state.gate;if(state.fail)throw state.imageError||Error('Private remote URL must not leak');return {type:'image/png',body:png}}});
  db.prepare('INSERT INTO competitors(id,name) VALUES (?,?)').run('fixture','Media fixture');
  db.prepare('INSERT INTO profiles(id,competitor_id,platform,identifier,confirmed) VALUES (?,?,?,?,1)').run('profile','fixture','instagram','fixture');
  persistProfileItems(db,{id:'profile',competitorId:'fixture',platform:'instagram'},[{externalId:'post',kind:'organic',format:'instagram_carousel',thumbnail:cdn,media:[{type:'image',url:'https://scontent.test.fbcdn.net/slide.png'},{type:'video',url:'https://scontent.test.fbcdn.net/video.mp4'}],title:'Preserved caption',sourceUrl:'https://www.instagram.com/p/fixture/'}],true);
@@ -57,9 +61,12 @@ async function fixture(t){
  const server=app.app.listen(0,'127.0.0.1');await once(server,'listening');const base=`http://127.0.0.1:${server.address().port}`;
  async function actor(path,body){const response=await fetch(base+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});assert.equal(response.status,path==='/auth/signup'?201:200);return {cookie:response.headers.getSetCookie().find(c=>c.startsWith('levr_session=')).split(';')[0],session:await response.json()}}
  const owner=await actor('/auth/login',{email:'fraser@wearelevr.com',password});
- const client=await actor('/auth/signup',{email:'media@example.test',password,fullName:'Media Client',companyName:'Test company',marketingConsent:false});
+ async function create(path,body){const r=await fetch(base+path,{method:'POST',headers:{Cookie:owner.cookie,'X-CSRF-Token':owner.session.csrf,'Content-Type':'application/json'},body:JSON.stringify(body)});assert.ok(r.ok);return r.json()}
+ const workspace=await create('/api/workspaces',{name:'Media client'});
+ const invite=await create(`/api/workspaces/${workspace.id}/invites`,{email:'media@example.test'});
+ const client=await actor('/auth/accept-invite',{email:'media@example.test',password,token:invite.token});
  const imagePath=`/api/workspaces/levr/items/${item.id}/image/thumbnail`;
- t.after(async()=>{await new Promise(resolve=>server.close(resolve));app.closeWorkspaceDatabases();db.close()});
+ t.after(async()=>{await app.waitForRefresh();await new Promise(resolve=>server.close(resolve));app.closeWorkspaceDatabases();db.close()});
  return {db,state,app,item,base,owner,client,imagePath,get:(path=imagePath,cookie=owner.cookie)=>fetch(base+path,{headers:cookie?{Cookie:cookie}:{}})};
 }
 test('Images require workspace access, use stored URLs only and preserve research on failure',async t=>{
@@ -118,4 +125,87 @@ test('Media refresh rejects duplicates and discards responses after session revo
  assert.equal((await post()).status,409);assert.equal(f.state.mediaCalls.length,1);
  f.db.prepare('DELETE FROM sessions').run();release();assert.equal((await first).status,404);assert.equal(f.db.prepare('SELECT data FROM items WHERE id=?').get(f.item.id).data,f.item.data);
  assert.equal(f.db.prepare('SELECT status FROM refreshes').get().status,'failed','revoked requests do not leave a permanent running history entry');
+});
+
+test('Video streams use stored URLs, authenticate workspace access and support ranges and HEAD',async t=>{
+ const f=await fixture(t),path=f.imagePath.replace('/image/thumbnail','/video/1');
+ assert.equal((await f.get(path,'')).status,401);
+ assert.equal((await f.get(path,f.client.cookie)).status,404);assert.equal(f.state.videoCalls.length,0);
+ const get=(headers={},method='GET')=>fetch(f.base+path,{method,headers:{Cookie:f.owner.cookie,...headers}});
+ const partial=await get({Range:'bytes=2-4'});assert.equal(partial.status,206);assert.equal(partial.headers.get('content-range'),'bytes 2-4/10');assert.equal(partial.headers.get('cache-control'),'private, no-store');assert.equal(await partial.text(),'abc');
+ assert.equal(f.state.videoCalls[0].range,'bytes=2-4');assert.match(f.state.videoCalls[0].target,/fbcdn.net\/video.mp4$/);
+ const head=await get({},'HEAD');assert.equal(head.status,200);assert.equal(await head.text(),'');assert.equal(f.state.videoCalls.at(-1).method,'HEAD');
+ const count=f.state.videoCalls.length;assert.equal((await get({Range:'bytes=0-1,4-5'})).status,416);assert.equal(f.state.videoCalls.length,count);
+ assert.equal((await f.get(path.replace('/video/1','/video/0'))).status,404);
+ let release;f.state.videoGate=new Promise(r=>release=r);const pending=get();while(f.state.videoCalls.length===count)await new Promise(r=>setTimeout(r,5));f.db.prepare('DELETE FROM sessions').run();release();assert.equal((await pending).status,404);
+});
+test('Video transport bounds ranges, validates responses and rejects unsafe redirects',async()=>{
+ for(const range of ['bytes=0-','bytes=0-15','bytes=-32'])assert.equal(videoRange(range),range);
+ for(const range of ['bytes=-0','bytes=8-1','bytes=0-1,4-5','bytes=9999999999999999-','items=1-2','bad'])assert.throws(()=>videoRange(range));
+ const calls=[],result=await openCdnVideo(cdn,{range:'bytes=2-4',request:transport([{status:206,headers:{'content-type':'video/mp4','content-length':'3','content-range':'bytes 2-4/10'},body:Buffer.from('abc')}],calls)});
+ assert.equal(result.status,206);assert.equal(result.headers['Content-Range'],'bytes 2-4/10');result.stream.destroy();
+ assert.equal(calls[0].options.headers.Range,'bytes=2-4');for(const key of ['Cookie','Authorization','Referer'])assert.equal(calls[0].options.headers[key],undefined);
+ for(const response of [{status:403},{headers:{'content-type':'text/html'}},{headers:{'content-type':'video/mp4','content-length':String(300*1024*1024)}},{status:206,headers:{'content-type':'video/mp4','content-range':'bad'}},{status:302,headers:{location:'https://127.0.0.1/private'}}])await assert.rejects(openCdnVideo(cdn,{range:'bytes=0-',request:transport([response])}));
+ const unsatisfied=await openCdnVideo(cdn,{range:'bytes=99-',request:transport([{status:416,headers:{'content-length':'123','content-range':'bytes */10'}}])});assert.equal(unsatisfied.headers['Content-Length'],'0');assert.equal(unsatisfied.headers['Content-Range'],'bytes */10');unsatisfied.stream.destroy();
+});
+
+test('A grid with more than eight images waits for available capacity instead of losing previews',async t=>{
+ const f=await fixture(t);let release;f.state.gate=new Promise(r=>release=r);
+ const requests=Array.from({length:12},()=>f.get());
+ while(f.state.calls.length<8)await new Promise(r=>setTimeout(r,5));
+ assert.equal(f.state.calls.length,8);release();
+ assert.deepEqual((await Promise.all(requests)).map(r=>r.status),Array(12).fill(200));assert.equal(f.state.calls.length,12);
+});
+
+test('Saved images and complete videos remain private and playable after the CDN stops working',async t=>{
+ const directory=mkdtempSync(join(tmpdir(),'arpra-cache-api-')),f=await fixture(t,{mediaCacheDirectory:directory});
+ t.after(()=>rmSync(directory,{recursive:true,force:true}));
+ assert.equal((await f.get()).status,200);f.state.fail=true;assert.equal((await f.get()).status,200);assert.equal(f.state.calls.length,1,'cached image does not depend on upstream');
+ assert.equal((await f.get(f.imagePath,f.client.cookie)).status,404,'cache hits still require workspace membership');
+ const path=f.imagePath.replace('/image/thumbnail','/video/1');
+ const first=await f.get(path);assert.equal(first.status,200);assert.equal(await first.text(),'abc');await f.app.waitForRefresh();
+ const calls=f.state.videoCalls.length;f.state.videoFail=true;
+ const cached=await fetch(f.base+path,{headers:{Cookie:f.owner.cookie,Range:'bytes=1-2'}});assert.equal(cached.status,206);assert.equal(cached.headers.get('content-range'),'bytes 1-2/3');assert.equal(await cached.text(),'bc');await f.app.waitForRefresh();assert.equal(f.state.videoCalls.length,calls);
+ const head=await fetch(f.base+path,{method:'HEAD',headers:{Cookie:f.owner.cookie}});assert.equal(head.status,200);assert.equal(head.headers.get('content-length'),'3');assert.equal(await head.text(),'');
+ assert.equal((await f.get(path,f.client.cookie)).status,404);
+ const changed={...JSON.parse(f.item.data),thumbnail:'https://scontent.test.fbcdn.net/different.jpg'};f.db.prepare('UPDATE items SET data=? WHERE id=?').run(JSON.stringify(changed),f.item.id);assert.equal((await f.get()).status,502,'a new source URL must not receive a stale cached picture');
+ f.db.prepare('DELETE FROM sessions').run();assert.equal((await f.get(path)).status,401);
+});
+
+test('Manual batch repair is scoped, bounded, deduplicated and preserves failed posts',async t=>{
+ const f=await fixture(t);
+ persistProfileItems(f.db,{id:'profile',competitorId:'fixture',platform:'instagram'},['second','third'].map(externalId=>({externalId,kind:'organic',format:'instagram_image',title:externalId,thumbnail:cdn,media:[{type:'image',url:cdn}],caption:'Retain me'})),true);
+ const rows=f.db.prepare('SELECT id,external_id,data FROM items ORDER BY external_id').all(),ids=rows.map(r=>r.id);
+ const post=(body,actor=f.owner,csrf=actor.session.csrf)=>fetch(f.base+'/api/media-repair',{method:'POST',headers:{Cookie:actor.cookie,'X-CSRF-Token':csrf,'Content-Type':'application/json'},body:JSON.stringify(body)});
+ assert.equal((await post({itemIds:ids},f.client)).status,404);assert.equal((await post({itemIds:ids},f.owner,'bad')).status,403);assert.equal((await post({itemIds:Array(51).fill(ids[0])})).status,400);assert.equal(f.state.mediaCalls.length,0);
+ let release;f.state.mediaGate=new Promise(r=>release=r);f.state.mediaFailures.add('second');
+ const started=await post({itemIds:[...ids,ids[0]]});assert.equal(started.status,202);assert.equal((await started.json()).total,3);
+ assert.equal((await post({itemIds:ids})).status,409);
+ const pending=await f.get('/api/media-repair');assert.equal((await pending.json()).running,true);release();await f.app.waitForRefresh();
+ const status=await (await f.get('/api/media-repair')).json();assert.equal(status.running,false);assert.equal(status.completed,3);assert.equal(status.repaired,2);assert.equal(status.errors.length,1);assert.equal(f.state.mediaCalls.length,3);
+ const failed=rows.find(r=>r.external_id==='second'),preserved=JSON.parse(f.db.prepare('SELECT data FROM items WHERE id=?').get(failed.id).data);assert.deepEqual(preserved.media,JSON.parse(failed.data).media);assert.equal(preserved.caption,'Retain me');
+ assert.equal((await (await f.get('/api/media-repair',f.client.cookie)).json()).total,0);
+ assert.equal(f.db.prepare("SELECT count(*) n FROM refreshes WHERE status='failed'").get().n,1);
+});
+
+test('Media checks identify provider denial without exposing signed links, credentials or upstream bodies',async t=>{
+ const f=await fixture(t),path=f.imagePath+'?check=1';
+ assert.equal((await f.get(path,'')).status,401);
+ assert.equal((await f.get(path,f.client.cookie)).status,404);assert.equal(f.state.calls.length,0);
+ const response=await f.get(path),result=await response.json();
+ assert.equal(result.ok,true);assert.equal(result.version,'media-check-1');assert.equal(result.type,'image/png');
+ assert.equal(f.state.mediaCalls.length,0,'checking saved files uses no provider credits');
+ f.state.fail=true;f.state.imageError=Object.assign(Error('Secret signed URL https://cdn.test/token?secret=private'),{mediaCode:'upstream_denied',upstreamStatus:403});
+ const failed=await f.get(path),detail=await failed.json();
+ assert.equal(failed.status,502);assert.equal(detail.code,'upstream_denied');assert.equal(detail.upstreamStatus,403);
+ assert.doesNotMatch(JSON.stringify(detail),/secret|private|https:|cdninstagram|owner-test-key/i);
+ const video=await f.get(f.imagePath.replace('/image/thumbnail','/video/1')+'?check=1');
+ assert.equal((await video.json()).ok,true);assert.equal(f.state.videoCalls.at(-1).range,'bytes=0-1023');
+ assert.equal(f.state.mediaCalls.length,0);
+});
+test('Real image and video transport errors retain safe reasons for the check',async()=>{
+ for(const [status,code]of [[403,'upstream_denied'],[404,'upstream_missing'],[429,'upstream_busy'],[503,'upstream_busy']]){
+  for(const load of [fetchCdnImage,openCdnVideo])await assert.rejects(load(cdn,{request:transport([{status}])}),error=>error.mediaCode===code&&error.upstreamStatus===status);
+ }
+ for(const load of [fetchCdnImage,openCdnVideo])await assert.rejects(load(cdn,{request:transport([{headers:{'content-type':'text/html'}}])}),error=>error.mediaCode==='unsupported_type');
 });
