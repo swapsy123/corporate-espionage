@@ -209,3 +209,21 @@ test('Real image and video transport errors retain safe reasons for the check',a
  }
  for(const load of [fetchCdnImage,openCdnVideo])await assert.rejects(load(cdn,{request:transport([{headers:{'content-type':'text/html'}}])}),error=>error.mediaCode==='unsupported_type');
 });
+
+test('Paid ad single and batch repairs use the workspace provider, preserve research and reject foreign IDs',async t=>{
+ const f=await fixture(t);f.db.prepare('INSERT INTO profiles(id,competitor_id,platform,identifier,confirmed) VALUES (?,?,?,?,1)').run('meta','fixture','meta','123');
+ persistProfileItems(f.db,{id:'meta',competitorId:'fixture',platform:'meta'},['901','902'].map(externalId=>({externalId,kind:'paid',format:'ad_video',active:true,startDate:'2026-09-01T00:00:00Z',caption:'Keep original ad copy',transcript:'Keep original transcript',media:[{type:'video',url:'https://scontent.test.fbcdn.net/old.mp4'}]})),true);
+ const [one,two]=f.db.prepare("SELECT * FROM items WHERE platform='meta' ORDER BY external_id").all();
+ const post=(path,body,actor=f.owner)=>fetch(f.base+path,{method:'POST',headers:{Cookie:actor.cookie,'X-CSRF-Token':actor.session.csrf,'Content-Type':'application/json'},body:JSON.stringify(body)});
+ assert.equal((await post(`/api/items/${one.id}/media-refresh`,{},f.client)).status,404);assert.equal(f.state.mediaCalls.length,0);
+ const response=await post(`/api/items/${one.id}/media-refresh`,{});assert.equal(response.status,200);
+ assert.equal(f.state.mediaCalls[0].item.platform,'meta');assert.equal(f.state.mediaCalls[0].item.externalId,'901');assert.equal(f.state.mediaCalls[0].apiKey,'owner-test-key');
+ const original=JSON.parse(one.data),current=JSON.parse(f.db.prepare('SELECT data FROM items WHERE id=?').get(one.id).data);
+ for(const key of ['active','startDate','caption','transcript'])assert.equal(current[key],original[key]);
+ assert.equal(f.db.prepare('SELECT first_seen,last_seen FROM items WHERE id=?').get(one.id).first_seen,one.first_seen);
+ f.state.mediaFailures.add('902');
+ assert.equal((await post('/api/media-repair',{itemIds:[one.id,two.id]})).status,202);await f.app.waitForRefresh();
+ const batch=await (await f.get('/api/media-repair')).json();assert.equal(batch.repaired,1);assert.equal(batch.errors.length,1);
+ const failed=JSON.parse(f.db.prepare('SELECT data FROM items WHERE id=?').get(two.id).data);assert.deepEqual(failed.media,JSON.parse(two.data).media);assert.equal(failed.caption,'Keep original ad copy');
+ assert.ok(f.db.prepare('SELECT warnings FROM refreshes').all().some(row=>row.warnings.includes('Meta ad media refresh')));
+});

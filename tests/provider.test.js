@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { collectProfile, normalizeMetaAd, normalizeInstagram, normalizeYouTube, searchMetaCompanies, refreshInstagramMedia } from '../server/provider.js';
+import { refreshCreativeMedia, refreshMetaAdMedia, collectProfile, normalizeMetaAd, normalizeInstagram, normalizeYouTube, searchMetaCompanies, refreshInstagramMedia } from '../server/provider.js';
 // Shapes and field names from the official @scrapecreators/cli 1.0.87 API examples.
 const ad = (id='1162496978867592', extra={}) => ({ad_archive_id:id,is_active:true,page_id:'367152833370567',page_name:'Example advertiser',start_date:1740643200,snapshot:{body:{text:'A sourced ad caption'},title:'Headline',cta_text:'Learn more',link_url:'https://example.com/offer',display_format:'IMAGE',images:[{original_image_url:'https://cdn.example.com/ad.jpg'}]},...extra});
 const ig = (id='3600545900919030401',extra={}) => ({pk:id,id:`${id}_260462810`,code:'ExamplePost',media_type:2,product_type:'clips',created_at:'2025-03-31T16:29:30.000Z',taken_at:1743438570,caption:{text:'Actual caption'},like_count:14,comment_count:2,ig_play_count:1000,play_count:1200,image_versions2:{candidates:[{url:'https://cdn.example.com/cover.jpg'}]},video_versions:[{url:'https://cdn.example.com/video.mp4'}],...extra});
@@ -130,4 +130,23 @@ test('Instagram media renewal preserves slide order and rejects mismatched or in
   const m=mock([{data:{xdt_shortcode_media:r}}]);await assert.rejects(refreshInstagramMedia(item,options(m.fetchImpl)),/preserved/);
  }
  const rejected=mock([]);await assert.rejects(refreshInstagramMedia({...item,sourceUrl:'https://evil.test/p/Fixture/'},options(rejected.fetchImpl)),/original Instagram/);assert.equal(rejected.calls.length,0);
+});
+
+test('Media normalization skips invalid preferred URLs and retains valid fallback image/video candidates',()=>{
+ const image=normalizeMetaAd(ad('123',{snapshot:{display_format:'image',images:[{original_image_url:'opaque-provider-handle',resized_image_url:'https://scontent.test.fbcdn.net/image.jpg'}]}}));
+ assert.equal(image.media[0].url,'https://scontent.test.fbcdn.net/image.jpg');
+ const movie=normalizeMetaAd(ad('124',{snapshot:{display_format:'video',videos:[{video_hd_url:'opaque-handle',video_sd_url:'https://scontent.test.fbcdn.net/movie.mp4'}]}}));
+ assert.equal(movie.media[0].type,'video');assert.equal(movie.media[0].url,'https://scontent.test.fbcdn.net/movie.mp4');
+ const reel=normalizeInstagram(ig('125',{video_versions:[{url:'not a URL'},{url:'https://scontent.test.cdninstagram.com/reel.mp4'}],image_versions2:{candidates:[{url:'invalid'},{url:'https://scontent.test.cdninstagram.com/reel.jpg'}]}}));
+ assert.equal(reel.media[0].type,'video');assert.equal(reel.media[0].url,'https://scontent.test.cdninstagram.com/reel.mp4');assert.equal(reel.thumbnail,'https://scontent.test.cdninstagram.com/reel.jpg');
+ const strings=normalizeMetaAd(ad('126',{snapshot:{extra_videos:['https://scontent.test.fbcdn.net/extra.mp4']}}));assert.equal(strings.media[0].type,'video');
+});
+test('Exact Meta media renewal uses the documented ad detail identity and preserves video/image carousel order',async()=>{
+ const item={platform:'meta',kind:'paid',externalId:'123'};
+ const response={adArchiveID:'123',isActive:false,snapshot:{display_format:'carousel',cards:[{video_hd_url:'not-a-url',video_sd_url:'https://scontent.test.fbcdn.net/video.mp4',video_preview_image_url:'https://scontent.test.fbcdn.net/poster.jpg'},{original_image_url:'https://scontent.test.fbcdn.net/slide.jpg'}]}};
+ const m=mock([response]);const result=await refreshCreativeMedia(item,options(m.fetchImpl));
+ assert.equal(m.calls.length,1);assert.equal(m.calls[0].path,'/v1/facebook/adLibrary/ad');assert.equal(m.calls[0].params.id,'123');assert.equal(m.calls[0].params.get_transcript,'false');assert.equal(m.calls[0].options.method,'GET');
+ assert.deepEqual(Object.keys(result).sort(),['media','thumbnail']);assert.deepEqual(result.media.map(m=>m.type),['video','image']);assert.equal(result.thumbnail,'https://scontent.test.fbcdn.net/poster.jpg');
+ for(const bad of [{...response,adArchiveID:'456'},{...response,adArchiveID:undefined},{...response,snapshot:{}},{...response,snapshot:{cards:[response.snapshot.cards[0],{title:'Missing image'}]}}])await assert.rejects(refreshMetaAdMedia(item,options(mock([bad]).fetchImpl)),/Existing media was preserved/);
+ let calls=0;await assert.rejects(refreshMetaAdMedia({...item,externalId:'https://private.example.test'},options(async()=>{calls++})),/valid Meta ad archive ID/);assert.equal(calls,0);
 });

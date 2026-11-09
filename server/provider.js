@@ -26,27 +26,31 @@ function blank() {
     active: null, views: null, likes: null, comments: null, shares: null, totalEngagement: null };
 }
 function mediaEntry(item) {
-  const thumbnail = [item.image_versions2?.candidates?.[0]?.url, item.display_uri, item.display_url, item.thumbnail_src, item.thumbnail, item.video_preview_image_url].map(url).find(Boolean)||null;
-  const video = url(first(item.video_versions?.[0]?.url, item.video_url, item.video_hd_url, item.video_sd_url, item.video_hd_handle, item.video_sd_handle));
-  const image = url(first(item.original_image_url, item.resized_image_url, item.image_url, item.image, thumbnail));
+  if(!item||typeof item!=='object')return null;
+  const thumbnail = [...(item.image_versions2?.candidates||[]).map(c=>c?.url), item.display_uri, item.display_url, item.thumbnail_src, item.thumbnail, item.video_preview_image_url].map(url).find(Boolean)||null;
+  // Check each candidate before choosing it. An opaque/invalid HD value must
+  // not hide a usable SD URL, and an invalid original must not hide a resized image.
+  const video = [...(item.video_versions||[]).map(v=>v?.url), item.video_url, item.video_hd_url, item.video_sd_url, item.video_hd_handle, item.video_sd_handle].map(url).find(Boolean);
+  const image = [item.original_image_url, item.resized_image_url, item.image_url, item.image, thumbnail].map(url).find(Boolean);
   return video ? {type:'video', url:video, thumbnail:thumbnail || image} : image ? {type:'image', url:image} : null;
 }
 export function normalizeMetaAd(raw) {
   const externalId = cleanText(String(raw.ad_archive_id ?? ''));
   if (!externalId || !/^\d+$/.test(externalId)) throw new ProviderError('Meta returned an ad without a valid archive ID. Previous records were preserved.');
   const s = raw.snapshot || {};
-  const media = [...(s.cards || []), ...(s.videos || []), ...(s.images || []), ...(s.extra_videos || []), ...(s.extra_images || [])]
-    .map(x => mediaEntry(typeof x === 'string' ? {image_url:x} : x)).filter(Boolean);
+  const entries=(values,type)=>Array.isArray(values)?values.map(value=>typeof value==='string'?{[type==='video'?'video_url':'image_url']:value}:value):[];
+  const cards=Array.isArray(s.cards)?s.cards:[],displayFormat=String(s.display_format||'').toUpperCase();
+  const media = [...entries(cards,'image'), ...entries(s.videos,'video'), ...entries(s.images,'image'), ...entries(s.extra_videos,'video'), ...entries(s.extra_images,'image')].map(mediaEntry).filter(Boolean);
   const uniqueMedia = [...new Map(media.map(x=>[x.url,x])).values()];
   return {...blank(), externalId, kind:'paid', platform:'meta',
-    format:s.cards?.length || s.display_format === 'CAROUSEL' ? 'ad_carousel' : uniqueMedia.some(x=>x.type === 'video') || s.display_format === 'VIDEO' ? 'ad_video' : 'ad_image',
+    format:cards.length || displayFormat === 'CAROUSEL' ? 'ad_carousel' : uniqueMedia.some(x=>x.type === 'video') || displayFormat === 'VIDEO' ? 'ad_video' : 'ad_image',
     advertiser:cleanText(raw.page_name || s.page_name), title:cleanText(s.title), headline:cleanText(s.title),
     caption:cleanText(typeof s.body === 'string' ? s.body : s.body?.text),
     cta:cleanText(s.cta_text || s.cta_type), landingUrl:url(s.link_url),
     sourceUrl:metaAdLibraryReviewUrl(`https://www.facebook.com/ads/library/?id=${externalId}`),
     media:uniqueMedia, thumbnail:uniqueMedia[0]?.thumbnail || (uniqueMedia[0]?.type === 'image' ? uniqueMedia[0].url : null),
     startDate:date(first(raw.start_date_string, raw.start_date)), active:raw.is_active === true,
-    creativeVariants:(s.cards || []).map(card=>({title:cleanText(card.title),caption:cleanText(card.body),cta:cleanText(card.cta_text),landingUrl:url(card.link_url)})),
+    creativeVariants:cards.filter(card=>card&&typeof card==='object').map(card=>({title:cleanText(card.title),caption:cleanText(card.body),cta:cleanText(card.cta_text),landingUrl:url(card.link_url)})),
   };
 }
 export function normalizeInstagram(raw) {
@@ -116,6 +120,27 @@ export async function refreshInstagramMedia(item,options={}){
  const media=rows.map(mediaEntry),thumbnail=[record.display_url,record.thumbnail_src,media[0]?.thumbnail,media[0]?.type==='image'?media[0].url:null].map(url).find(Boolean)||null;
  if(!thumbnail&&!media.length)throw new ProviderError('Instagram did not return usable media. Existing media was preserved.');
  return {media,thumbnail};
+}
+/** Explicit action: renew the exact public Meta archive ad using its stored ID.
+ * This endpoint uses ScrapeCreators, not the client's owned Meta ad account.
+ * The detail contract uses adArchiveID; company listings use ad_archive_id.
+ */
+export async function refreshMetaAdMedia(item,options={}){
+ const adId=String(item.externalId??'');
+ if(item.platform!=='meta'||item.kind!=='paid'||!/^\d{1,30}$/.test(adId))throw new ProviderError('This record needs a valid Meta ad archive ID before its media can be refreshed.');
+ const response=await client(options)('/v1/facebook/adLibrary/ad',{id:adId,get_transcript:false});
+ const returnedId=response.adArchiveID;
+ if((typeof returnedId==='number'&&!Number.isSafeInteger(returnedId))||String(returnedId)!==adId||!response.snapshot||typeof response.snapshot!=='object')throw new ProviderError('Meta returned a different or incomplete ad. Existing media was preserved.');
+ const cards=response.snapshot.cards;
+ if(Array.isArray(cards)&&cards.some(card=>!mediaEntry(typeof card==='string'?{image_url:card}:card)))throw new ProviderError('Meta did not return usable media for every creative variant. Existing media was preserved.');
+ const normalized=normalizeMetaAd({ad_archive_id:adId,snapshot:response.snapshot});
+ if(!normalized.media.length)throw new ProviderError('Meta did not return usable media for this ad. Existing media was preserved.');
+ // Renewal changes only media, not active state, age, copy or research signals.
+ return {media:normalized.media,thumbnail:normalized.thumbnail};
+}
+export function refreshCreativeMedia(item,options={}){
+ if(item.platform==='meta')return refreshMetaAdMedia(item,options);
+ return refreshInstagramMedia(item,options);
 }
 function client({apiKey = process.env.SCRAPECREATORS_API_KEY, fetchImpl = globalThis.fetch, signal} = {}) {
   if (!apiKey) throw new ProviderError('ScrapeCreators is not configured. Add SCRAPECREATORS_API_KEY in the server secret settings, then refresh again.');

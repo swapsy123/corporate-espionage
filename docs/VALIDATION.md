@@ -1,3 +1,11 @@
+# Paid-ad media repair — 9 November 2026
+
+- Production build passed; 134 Node tests passed (provider, refresh, retention, security and existing workflows).
+- Real-byte Chromium media tests passed with single video-ad repair and batch image-ad repair in the paid library, plus existing organic playback/cache, carousel and mobile checks. ARPRA also passed owned-ad, uploaded-media and Fathom checks.
+- Readable mobile paid-library screenshots were inspected. No production records, keys or credits were used.
+- The live failure remains unverified without an authenticated media check from the hosted app. This change addresses confirmed code gaps, not a claim that every live source is available.
+- No schema or secret changes. The free Render blueprint still has automatic deployment disabled.
+
 # Media playback and diagnostic validation — 9 November 2026
 
 - Production build passed; 130 Node tests passed, including cache/range behavior, concurrency, manual repairs, source preservation, scoped diagnostics and account deletion with cached media.

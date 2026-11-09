@@ -41,8 +41,15 @@ export function persistProfileItems(db,profile,items,complete) {
    for(const key of ['views','likes','comments','shares'])item[key]=typeof input[key]==='number'&&Number.isFinite(input[key])?Math.max(0,input[key]):previous[key]??null;
    item.transcript=input.transcript||previous.transcript||null;
    item.transcriptStatus=item.transcript?'available':input.transcriptStatus||'unavailable';
-   for(const key of ['sourceUrl','landingUrl','thumbnail'])item[key]=safeUrl(item[key]);
-   item.media=(item.media||[]).map(m=>({...m,url:safeUrl(m.url),thumbnail:safeUrl(m.thumbnail)})).filter(m=>m.url);
+   for(const key of ['sourceUrl','landingUrl'])item[key]=safeUrl(item[key]);
+   const usableMedia=value=>(Array.isArray(value)?value:[]).filter(m=>m&&typeof m==='object').map(m=>({...m,url:safeUrl(m.url),thumbnail:safeUrl(m.thumbnail)})).filter(m=>m.url);
+   const incoming=usableMedia(input.media),retained=usableMedia(previous.media);
+   // A valid collection response may omit creative files. Keep the previous
+   // preview (and its format/cache identity) while accepting fresh metrics/copy.
+   item.media=incoming.length?incoming:retained;
+   if(!incoming.length&&retained.length&&old){item.format=old.format;item.mediaWarning='The latest refresh returned no usable media. Previously saved media was retained.'}
+   else if(incoming.length)item.mediaWarning=null;
+   item.thumbnail=safeUrl(input.thumbnail)||item.media.find(m=>m.thumbnail)?.thumbnail||item.media.find(m=>m.type==='image')?.url||safeUrl(previous.thumbnail);
    item.analysis=analyzeItem(item);
    db.prepare('INSERT INTO items(id,competitor_id,profile_id,platform,external_id,kind,format,data,first_seen,last_seen) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(platform,external_id) DO UPDATE SET data=excluded.data,format=excluded.format,profile_id=excluded.profile_id,last_seen=excluded.last_seen').run(old?.id||id(),profile.competitorId,profile.id,profile.platform,String(item.externalId),item.kind,item.format,JSON.stringify(item),old?.first_seen||seen,seen);
   }
