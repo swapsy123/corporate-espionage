@@ -16,6 +16,7 @@
     "test:browser": "node scripts/browser-smoke.mjs",
     "test:signup:browser": "node scripts/browser-signup.mjs",
     "test:deletion:browser": "node scripts/browser-account-deletion.mjs",
+    "test:return:browser": "node scripts/browser-media-return.mjs",
     "test:media:browser": "node scripts/browser-media.mjs",
     "test:playback:browser": "node scripts/browser-playback.mjs"
   },

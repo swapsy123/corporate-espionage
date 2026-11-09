@@ -10,8 +10,10 @@ export function createWorkspaceManager(catalog,{directory}={}) {
  const workspaceDirectory=directory|| (rootFile?join(dirname(rootFile),'workspaces'):null);
  const context=new AsyncLocalStorage(),connections=new Map();
  const isActive=workspaceId=>!!catalog.prepare('SELECT 1 FROM workspaces WHERE id=?').get(workspaceId);
- const canAccess=req=>isActive(req.workspaceId)&&!!catalog.prepare('SELECT 1 FROM sessions WHERE token_hash=? AND expires_at>?').get(req.session.token_hash,Date.now())&&
-  (req.user.role==='owner'||!!catalog.prepare('SELECT 1 FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.workspace_id=? AND m.user_id=? AND u.disabled=0').get(req.workspaceId,req.user.id));
+ // Media already requested by an authorized user can finish saving after sign-out.
+ // Membership removal, disabled clients and workspace deletion still stop it.
+ const canMaintain=req=>isActive(req.workspaceId)&&(req.user.role==='owner'||!!catalog.prepare('SELECT 1 FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.workspace_id=? AND m.user_id=? AND u.disabled=0').get(req.workspaceId,req.user.id));
+ const canAccess=req=>canMaintain(req)&&!!catalog.prepare('SELECT 1 FROM sessions WHERE token_hash=? AND expires_at>?').get(req.session.token_hash,Date.now());
  const facade=new Proxy({}, {get(_,property){
   const scope=context.getStore(),connection=scope?.database;
   if(!connection)throw new Error('Research database requested without workspace authorization.');
@@ -54,5 +56,5 @@ export function createWorkspaceManager(catalog,{directory}={}) {
    unlinkSync(path);
   }
  }
- return {db:facade,middleware,isActive,canAccess,deleteFiles,run:(connection,workspaceId,callback)=>context.run({database:connection,workspaceId},callback),close(){for(const connection of connections.values())connection.close();connections.clear();},mediaCacheDirectory:rootFile?join(dirname(rootFile),'media-cache'):null,secretDirectory:rootFile?join(dirname(rootFile),'secrets'):null};
+ return {db:facade,middleware,isActive,canAccess,canMaintain,deleteFiles,run:(connection,workspaceId,callback)=>context.run({database:connection,workspaceId},callback),close(){for(const connection of connections.values())connection.close();connections.clear();},mediaCacheDirectory:rootFile?join(dirname(rootFile),'media-cache'):null,secretDirectory:rootFile?join(dirname(rootFile),'secrets'):null};
 }

@@ -206,6 +206,8 @@ test('SQLite migrations are repeatable and research, notes, brief, and refresh h
  const brief=(await s.req('/api/briefs',{method:'POST',body:{boardId:'inbox',format:'paid_ad',audience:'Business owners',offer:'Content research',objective:'Develop an original client acquisition concept'}})).data;
  assert.ok(brief.id);
  const counts=s.db.prepare('SELECT count(*) n FROM migrations').get().n;
+ const recordedWarnings=s.db.prepare('SELECT warnings FROM refreshes').get().warnings;
+ assert.match(recordedWarnings,/media files could not be retained/,'synthetic example.com media is not an approved relay source');
  await s.close();
  const reopened=openDatabase(path);
  try{
@@ -215,7 +217,7 @@ test('SQLite migrations are repeatable and research, notes, brief, and refresh h
   assert.equal(itemRows(reopened).length,2);
   const saved=reopened.prepare('SELECT * FROM opportunities WHERE id=?').get(opportunity.id);assert.equal(saved.notes,'Durable research note');assert.equal(saved.stage,'Briefing');assert.equal(saved.rating,4);assert.deepEqual(JSON.parse(saved.tags),['persisted']);
   const storedBrief=reopened.prepare('SELECT data FROM briefs WHERE id=?').get(brief.id);assert.equal(JSON.parse(storedBrief.data).adaptation.hook,brief.adaptation.hook);
-  const refresh=reopened.prepare('SELECT * FROM refreshes').get();assert.equal(refresh.status,'success');assert.equal(refresh.item_count,2);assert.deepEqual(JSON.parse(refresh.warnings),[]);
+  const refresh=reopened.prepare('SELECT * FROM refreshes').get();assert.equal(refresh.status,'success');assert.equal(refresh.item_count,2);assert.equal(refresh.warnings,recordedWarnings);
  }finally{reopened.close();}
 });
 

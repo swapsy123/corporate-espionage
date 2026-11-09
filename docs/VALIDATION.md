@@ -1,3 +1,11 @@
+# Return-visit media persistence — 9 November 2026
+
+- Production client build passed; 138 Node tests passed. Targeted cache/return-visit tests also passed after the final download-concurrency adjustment.
+- `npm run test:return:browser` passed in Chromium with actual PNG/MP4 bytes: collection before viewing, logout, service restart, new login, CDN signature rotation, unavailable source, desktop/mobile image rendering, playback and seeking. Zero media-repair calls; no provider call on return.
+- Integration coverage verifies that an in-flight save finishes after sign-out and media survives on disk across service instances. Existing account-deletion, revoked-access and workspace-isolation checks pass.
+- New tests cover stable asset identity versus changed transforms/files, legacy cache migration, thumbnail protection under video pressure and accurate failure reporting when a video cannot fit.
+- No database migration, API credential or automatic collection job was added. Existing storage caps remain; this does not establish unlimited archival retention or verify the live hosting volume.
+
 # Paid-ad media repair — 9 November 2026
 
 - Production build passed; 134 Node tests passed (provider, refresh, retention, security and existing workflows).

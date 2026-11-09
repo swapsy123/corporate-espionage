@@ -63,7 +63,7 @@ export function registerVideoRoutes(app,{db,manager,openVideo=openCdnVideo,cache
    if(!manager.canAccess(req))return res.status(404).end();
    source=await cache?.getVideo(req.workspaceId,`${req.params.collection}:${req.params.itemId}`,'video-'+req.params.index,target,{range,method:req.method});const cached=!!source;
    source ||= await openVideo(target,{range,method:req.method==='HEAD'?'HEAD':'GET',signal:controller.signal});
-   if(req.query.check!=='1'&&req.method==='GET'&&source.status<300&&cache)cache.retainVideo(req.workspaceId,`${req.params.collection}:${req.params.itemId}`,target,openVideo,()=>manager.canAccess(req)).catch(()=>{});
+   if(req.query.check!=='1'&&req.method==='GET'&&source.status<300&&cache)cache.retainVideo(req.workspaceId,`${req.params.collection}:${req.params.itemId}`,target,openVideo,()=>manager.canMaintain(req)).catch(()=>{});
    if(res.destroyed)return;
    if(!manager.canAccess(req))return res.status(404).end();
    if(req.query.check==='1'){

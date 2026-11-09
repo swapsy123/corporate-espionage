@@ -12,8 +12,19 @@ const videoTypes=new Set(['video/mp4','video/webm']);
 const hash=value=>createHash('sha256').update(value).digest('hex');
 
 // Private files live alongside the durable database, never under the web root.
-// Cache keys include workspace, record, media type and full source URL. Updated media
-// therefore cannot accidentally return a previous creative or another tenant's file.
+// Cache keys include workspace, record, media type and asset identity. Known CDN
+// signatures can change without replacing the underlying file. Transform parameters
+// and paths remain part of the identity, preventing reuse for a different creative.
+export function mediaAssetIdentity(value){
+ const allowed=mediaImageUrl(value);if(!allowed)return value;
+ const u=new URL(allowed);
+ const family=['fbcdn.net','cdninstagram.com'].find(host=>u.hostname===host||u.hostname.endsWith('.'+host));
+ if(!family)return allowed;
+ // Keep image transforms (stp), encoding (efg), asset IDs and unknown parameters.
+ // Only known authentication/routing parameters are independent of file content.
+ for(const key of ['oh','oe','_nc_ohc','_nc_oc','_nc_gid','_nc_ht','_nc_zt','_nc_cat','_nc_sid','ccb'])u.searchParams.delete(key);
+ u.hostname=family;u.searchParams.sort();return u.href;
+}
 export function createMediaCache({directory,maxWorkspaceBytes=128*MB,maxTotalBytes=384*MB,maxVideoBytes=128*MB}={}){
  if(!directory)return null;
  const writes=new Map(),deleted=new Set();
@@ -28,19 +39,28 @@ export function createMediaCache({directory,maxWorkspaceBytes=128*MB,maxTotalByt
   rmSync(join(root,hash(workspace)),{recursive:true,force:true});
  }
  let pruning=Promise.resolve(),warming=Promise.resolve();
- function paths(workspace,record,slot,url){
+ function paths(workspace,record,slot,url,legacy=false){
   const folder=join(directory,hash(workspace));
-  const key=hash(JSON.stringify([record,slot,url]));
+  const key=hash(JSON.stringify([record,slot,legacy?url:mediaAssetIdentity(url)]));
   return {folder,key,body:join(folder,key+'.bin'),meta:join(folder,key+'.json')};
  }
  async function entry(workspace,record,slot,url,types){
   const p=paths(workspace,record,slot,url);
-  try{
-   const meta=JSON.parse(await readFile(p.meta,'utf8')),info=await stat(p.body);
-   if(!types.has(meta.type)||!Number.isSafeInteger(meta.size)||meta.size<=0||info.size!==meta.size)return null;
-   await utimes(p.meta,new Date(),new Date()).catch(()=>{});
-   return {...p,...meta};
-  }catch{return null}
+  async function read(p){
+   try{
+    const meta=JSON.parse(await readFile(p.meta,'utf8')),info=await stat(p.body);
+    if(!types.has(meta.type)||!Number.isSafeInteger(meta.size)||meta.size<=0||info.size!==meta.size)return null;
+    await utimes(p.meta,new Date(),new Date()).catch(()=>{});return {...p,...meta};
+   }catch{return null}
+  }
+  const current=await read(p);if(current)return current;
+  // Upgrade existing private copies in place while their current saved URL is
+  // available. No provider request or duplicate full video is required.
+  const legacy=paths(workspace,record,slot,url,true);
+  if(legacy.key===p.key)return null;
+  const previous=await read(legacy);if(!previous)return null;
+  try{await rename(legacy.body,p.body);await rename(legacy.meta,p.meta)}catch{}
+  return await read(p)||await read(legacy);
  }
  async function prune(){
   const rows=[];
@@ -55,14 +75,15 @@ export function createMediaCache({directory,maxWorkspaceBytes=128*MB,maxTotalByt
     }
     if(!/^[a-f0-9]{64}\.json$/.test(name))continue;
     const meta=join(dir,name),body=join(dir,name.replace('.json','.bin'));
-    try{const [m,b]=await Promise.all([stat(meta),stat(body)]);rows.push({meta,body,workspace:folder.name,size:b.size,time:m.mtimeMs})}catch{}
+    try{const [m,b]=await Promise.all([stat(meta),stat(body)]);const type=JSON.parse(await readFile(meta,'utf8')).type;rows.push({meta,body,workspace:folder.name,size:b.size,time:m.mtimeMs,video:videoTypes.has(type)})}catch{}
    }
   }
   const totals=new Map();let total=0;
   for(const r of rows){total+=r.size;totals.set(r.workspace,(totals.get(r.workspace)||0)+r.size)}
-  for(const r of rows.sort((a,b)=>a.time-b.time)){
+  for(const r of rows.sort((a,b)=>Number(b.video)-Number(a.video)||a.time-b.time)){
    if(total<=maxTotalBytes&&totals.get(r.workspace)<=maxWorkspaceBytes)continue;
-   // Only cache files are evicted; source records, assets and research are untouched.
+   // Retire videos before images so large movies cannot empty every card preview.
+   // Only cache files are evicted; source records and research are untouched.
    await rm(r.meta,{force:true});await rm(r.body,{force:true});
    total-=r.size;totals.set(r.workspace,totals.get(r.workspace)-r.size);
   }
@@ -74,7 +95,7 @@ export function createMediaCache({directory,maxWorkspaceBytes=128*MB,maxTotalByt
    await writeFile(metaTemp,JSON.stringify({type,size}),{mode:0o600,flag:'wx'});
    if(!allowed())return;
    await rename(temp,p.body);await rename(metaTemp,p.meta);
-   pruning=pruning.catch(()=>{}).then(prune);await pruning;
+   pruning=pruning.catch(()=>{}).then(prune);await pruning;return !!await stat(p.meta).catch(()=>null)&&!!await stat(p.body).catch(()=>null);
   }finally{await rm(metaTemp,{force:true}).catch(()=>{})}
  }
  async function put(workspace,record,slot,url,producer,authorize=()=>true){
@@ -88,7 +109,7 @@ export function createMediaCache({directory,maxWorkspaceBytes=128*MB,maxTotalByt
     await mkdir(p.folder,{recursive:true,mode:0o700});
     const {type,size}=await producer(temp);
     if(!size||size>maxWorkspaceBytes||size>maxTotalBytes||!allowed())return false;
-    await commit(p,temp,type,size,allowed);return allowed();
+    return !!await commit(p,temp,type,size,allowed)&&allowed();
    }catch{return false}
    finally{await rm(temp,{force:true}).catch(()=>{});writes.delete(p.body);if(deleted.has(workspace))deleteWorkspace(workspace)}
   })();
@@ -133,15 +154,15 @@ export function createMediaCache({directory,maxWorkspaceBytes=128*MB,maxTotalByt
    }finally{source.stream?.destroy()}
   },allowed);
  }
- async function warmNow(workspace,record,item,{fetchImage,openVideo,allowed=()=>true}){
-  // Only called by a manual repair. No provider/API requests occur on a cache miss.
+ async function warmNow(workspace,record,item,{fetchImage,openVideo,allowed=()=>true,imagesOnly=false,videosOnly=false}){
+  // Retain files as part of collection or explicit repair. No provider/API requests occur on a cache miss.
   let failed=0;
-  for(const candidate of imageCandidates(item)){
+  for(const candidate of videosOnly?[]:imageCandidates(item)){
    if(!allowed())break;
    const url=mediaImageUrl(candidate.url);if(!url){failed++;continue}
    try{if(!await getImage(workspace,record,candidate.slot,url)&&!await putImage(workspace,record,candidate.slot,url,await fetchImage(url),allowed))failed++}catch{failed++}
   }
-  for(const [index,media] of (item.media||[]).entries()){
+  for(const [index,media] of (imagesOnly?[]:item.media||[]).entries()){
    if(!allowed())break;
    if(media.type==='video'&&(!mediaImageUrl(media.url)||!await putVideo(workspace,record,'video-'+index,media.url,openVideo,allowed)))failed++;
   }
@@ -149,5 +170,24 @@ export function createMediaCache({directory,maxWorkspaceBytes=128*MB,maxTotalByt
  }
  function retainVideo(workspace,record,url,openVideo,allowed){const task=warming.catch(()=>{}).then(()=>putVideo(workspace,record,'video',url,openVideo,allowed));warming=task;return task}
  function warm(...args){const task=warming.catch(()=>{}).then(()=>warmNow(...args));warming=task;return task}
- return {deleteWorkspace,getImage,putImage,getVideo,retainVideo,warm,wait:()=>Promise.all([...writes.values(),pruning,warming])};
+ function warmMany(workspace,items,options){
+  const task=warming.catch(()=>{}).then(async()=>{
+   let failed=0;
+   // Save thumbnails/slides for the whole collected page before downloading
+   // full movies; a long clip must not delay every other preview until expiry.
+   for(const imagesOnly of [true,false]){
+    let next=0;
+    async function worker(){
+     while(next<items.length){
+      if(options.allowed&&!options.allowed()){failed++;return}
+      const item=items[next++];
+      const result=await warmNow(workspace,`items:${item.id}`,item,{...options,imagesOnly,videosOnly:!imagesOnly});failed+=result.failed;
+     }
+    }
+    await Promise.all(Array.from({length:Math.min(items.length,imagesOnly?4:2)},worker));
+   }
+   return {failed};
+  });warming=task;return task;
+ }
+ return {deleteWorkspace,getImage,putImage,getVideo,retainVideo,warm,warmMany,wait:async()=>{let observed;do{observed=warming;await Promise.all([...writes.values(),pruning,observed])}while(observed!==warming||writes.size)}};
 }

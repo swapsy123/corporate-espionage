@@ -1,6 +1,7 @@
+import {createHash} from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,readdir,stat,writeFile} from 'node:fs/promises';
+import {mkdir,mkdtemp,rm,readdir,stat,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {Readable} from 'node:stream';
@@ -67,4 +68,29 @@ test('Deleting a workspace removes media and prevents in-flight writes from rest
  assert.equal(await cache.getImage(workspace,'items:old','thumbnail',cdn),null);
  assert.equal(await cache.putImage(workspace,'items:late','thumbnail',cdn,image),false);
  assert.deepEqual(await readdir(directory),[]);
+});
+
+test('Saved assets survive CDN signature/edge changes but never match a different file or transform',async t=>{
+ const directory=await mkdtemp(join(tmpdir(),'media-identity-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+ const old='https://scontent-lhr1.xx.fbcdn.net/v/photo.jpg?stp=crop100&oh=old&oe=1&_nc_cat=8',next='https://scontent-den2.xx.fbcdn.net/v/photo.jpg?oe=2&oh=new&stp=crop100&_nc_cat=9';
+ const cache=createMediaCache({directory});await cache.putImage('a','items:one','thumbnail',old,image);
+ const restarted=createMediaCache({directory});assert.deepEqual(await restarted.getImage('a','items:one','thumbnail',next),image);
+ for(const other of [next.replace('crop100','crop200'),next.replace('photo.jpg','other.jpg'),next+'&asset_revision=2'])assert.equal(await restarted.getImage('a','items:one','thumbnail',other),null);
+ assert.equal(await restarted.getImage('b','items:one','thumbnail',next),null);assert.equal(await restarted.getImage('a','items:two','thumbnail',next),null);
+});
+test('Existing exact-URL cache files are upgraded without another download',async t=>{
+ const directory=await mkdtemp(join(tmpdir(),'media-legacy-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+ const url='https://scontent.test.fbcdn.net/photo.jpg?oh=old&oe=1',workspace='a',record='items:one';
+ const folder=join(directory,createHash('sha256').update(workspace).digest('hex')),key=createHash('sha256').update(JSON.stringify([record,'image',url])).digest('hex');
+ await mkdir(folder,{recursive:true});await writeFile(join(folder,key+'.bin'),image.body);await writeFile(join(folder,key+'.json'),JSON.stringify({type:image.type,size:image.body.length}));
+ const cache=createMediaCache({directory});assert.deepEqual(await cache.getImage(workspace,record,'thumbnail',url),image);
+ assert.deepEqual(await createMediaCache({directory}).getImage(workspace,record,'thumbnail',url.replace('old','new')),image);
+ assert.equal((await readdir(folder)).filter(name=>name.endsWith('.bin')).length,1);
+});
+test('Video cache pressure retains thumbnail files and reports a copy that cannot fit',async t=>{
+ const directory=await mkdtemp(join(tmpdir(),'media-priority-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+ const cache=createMediaCache({directory,maxWorkspaceBytes:20,maxTotalBytes:20});
+ await cache.putImage('a','items:one','thumbnail',cdn,image);
+ const retained=await cache.retainVideo('a','items:video',cdn,async()=>({status:200,headers:{'Content-Type':'video/mp4','Content-Length':'20'},stream:Readable.from([Buffer.alloc(20)])}),()=>true);
+ assert.equal(retained,false);assert.deepEqual(await cache.getImage('a','items:one','thumbnail',cdn),image);
 });

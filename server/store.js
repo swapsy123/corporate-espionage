@@ -29,7 +29,7 @@ export function itemRows(db) {
 }
 const safeUrl = value=>{try{const u=new URL(value);return ['https:','http:'].includes(u.protocol)&&!u.username&&!u.password?u.href:null;}catch{return null;}};
 export function persistProfileItems(db,profile,items,complete) {
- const seen=now();
+ const seen=now(),stored=[];
  db.exec('BEGIN IMMEDIATE');
  try {
   for(const input of items){
@@ -51,13 +51,15 @@ export function persistProfileItems(db,profile,items,complete) {
    else if(incoming.length)item.mediaWarning=null;
    item.thumbnail=safeUrl(input.thumbnail)||item.media.find(m=>m.thumbnail)?.thumbnail||item.media.find(m=>m.type==='image')?.url||safeUrl(previous.thumbnail);
    item.analysis=analyzeItem(item);
-   db.prepare('INSERT INTO items(id,competitor_id,profile_id,platform,external_id,kind,format,data,first_seen,last_seen) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(platform,external_id) DO UPDATE SET data=excluded.data,format=excluded.format,profile_id=excluded.profile_id,last_seen=excluded.last_seen').run(old?.id||id(),profile.competitorId,profile.id,profile.platform,String(item.externalId),item.kind,item.format,JSON.stringify(item),old?.first_seen||seen,seen);
+   const itemId=old?.id||id();
+   db.prepare('INSERT INTO items(id,competitor_id,profile_id,platform,external_id,kind,format,data,first_seen,last_seen) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(platform,external_id) DO UPDATE SET data=excluded.data,format=excluded.format,profile_id=excluded.profile_id,last_seen=excluded.last_seen').run(itemId,profile.competitorId,profile.id,profile.platform,String(item.externalId),item.kind,item.format,JSON.stringify(item),old?.first_seen||seen,seen);
+   stored.push({...item,id:itemId});
   }
   if(profile.platform==='meta'&&complete){
    const ids=new Set(items.map(i=>String(i.externalId)));
    for(const r of db.prepare("SELECT id,external_id,data FROM items WHERE profile_id=? AND kind='paid'").all(profile.id))if(!ids.has(r.external_id)){const data=JSON.parse(r.data);data.active=false;db.prepare('UPDATE items SET data=? WHERE id=?').run(JSON.stringify(data),r.id);}
   }
-  db.exec('COMMIT');
+  db.exec('COMMIT');return stored;
  }catch(e){db.exec('ROLLBACK');throw e;}
 }
 export function boardRows(db){return db.prepare('SELECT boards.*,count(opportunities.id) itemCount FROM boards LEFT JOIN opportunities ON opportunities.board_id=boards.id GROUP BY boards.id ORDER BY boards.rowid').all();}
